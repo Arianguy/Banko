@@ -20,6 +20,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('fixed-deposits', [FixedDepositController::class, 'index'])->name('fixed-deposits');
         Route::post('fixed-deposits', [FixedDepositController::class, 'store'])->name('fixed-deposits.store');
+        Route::put('fixed-deposits/{id}/mature', [FixedDepositController::class, 'mature'])->name('fixed-deposits.mature');
+        Route::put('fixed-deposits/{id}/close', [FixedDepositController::class, 'close'])->name('fixed-deposits.close');
+        Route::put('fixed-deposits/{id}', [FixedDepositController::class, 'update'])->name('fixed-deposits.update');
     });
 });
 

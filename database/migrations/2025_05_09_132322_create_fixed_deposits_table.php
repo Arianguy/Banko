@@ -23,6 +23,8 @@ return new class extends Migration
             $table->decimal('int_rate', 5, 2);
             $table->decimal('Int_amt', 15, 2)->nullable();
             $table->decimal('Int_year', 15, 2)->default(0);
+            $table->boolean('matured')->default(false);
+            $table->boolean('closed')->default(false);
             $table->timestamps();
         });
     }

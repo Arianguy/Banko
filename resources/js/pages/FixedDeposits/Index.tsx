@@ -1,11 +1,13 @@
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
 import { router, usePage } from '@inertiajs/react';
+import { CheckCircle, Pencil, XCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 const BANKS = [
@@ -21,14 +23,14 @@ function getDaysBalance(maturity_date: string) {
     return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
 
-const AddDepositModal = ({ open, setOpen }: { open: boolean; setOpen: (v: boolean) => void }) => {
-    const [bank, setBank] = useState('SBI');
-    const [accountno, setAccountno] = useState('');
-    const [principal_amt, setPrincipalAmt] = useState('');
-    const [maturity_amt, setMaturityAmt] = useState('');
-    const [start_date, setStartDate] = useState('');
-    const [maturity_date, setMaturityDate] = useState('');
-    const [int_rate, setIntRate] = useState('');
+const AddDepositModal = ({ open, setOpen, fd, isEdit }: { open: boolean; setOpen: (v: boolean) => void; fd?: any; isEdit?: boolean }) => {
+    const [bank, setBank] = useState(fd?.bank || 'SBI');
+    const [accountno, setAccountno] = useState(fd?.accountno || '');
+    const [principal_amt, setPrincipalAmt] = useState(fd?.principal_amt || '');
+    const [maturity_amt, setMaturityAmt] = useState(fd?.maturity_amt || '');
+    const [start_date, setStartDate] = useState(fd?.start_date || '');
+    const [maturity_date, setMaturityDate] = useState(fd?.maturity_date || '');
+    const [int_rate, setIntRate] = useState(fd?.int_rate || '');
     const [submitting, setSubmitting] = useState(false);
     const [clientErrors, setClientErrors] = useState<any>({});
     const { errors } = usePage().props as any;
@@ -87,31 +89,61 @@ const AddDepositModal = ({ open, setOpen }: { open: boolean; setOpen: (v: boolea
         setClientErrors(newErrors);
         if (Object.keys(newErrors).length > 0) return;
         setSubmitting(true);
-        router.post(
-            '/fixed-deposits',
-            {
-                bank,
-                accountno,
-                principal_amt,
-                maturity_amt,
-                start_date,
-                maturity_date,
-                term: termVal,
-                int_rate,
-                Int_amt,
-                Int_year,
-            },
-            {
-                preserveScroll: true,
-                onFinish: () => setSubmitting(false),
-            },
-        );
+        if (isEdit && fd?.id) {
+            router.put(
+                `/fixed-deposits/${fd.id}`,
+                {
+                    bank,
+                    accountno,
+                    principal_amt,
+                    maturity_amt,
+                    start_date,
+                    maturity_date,
+                    term: termVal,
+                    int_rate,
+                    Int_amt,
+                    Int_year,
+                },
+                {
+                    preserveScroll: true,
+                    onSuccess: () => {
+                        setOpen(false);
+                        router.reload({ only: ['deposits'] });
+                    },
+                    onFinish: () => setSubmitting(false),
+                },
+            );
+        } else {
+            router.post(
+                '/fixed-deposits',
+                {
+                    bank,
+                    accountno,
+                    principal_amt,
+                    maturity_amt,
+                    start_date,
+                    maturity_date,
+                    term: termVal,
+                    int_rate,
+                    Int_amt,
+                    Int_year,
+                },
+                {
+                    preserveScroll: true,
+                    onSuccess: () => {
+                        setOpen(false);
+                        router.reload({ only: ['deposits'] });
+                    },
+                    onFinish: () => setSubmitting(false),
+                },
+            );
+        }
     };
 
     return (
         <DialogContent>
             <DialogHeader>
-                <DialogTitle>Add New Fixed Deposit</DialogTitle>
+                <DialogTitle>{isEdit ? 'Edit Fixed Deposit' : 'Add New Fixed Deposit'}</DialogTitle>
             </DialogHeader>
             <form className="space-y-4" onSubmit={handleSubmit}>
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -194,7 +226,7 @@ const AddDepositModal = ({ open, setOpen }: { open: boolean; setOpen: (v: boolea
                         </Button>
                     </DialogClose>
                     <Button type="submit" disabled={submitting}>
-                        {submitting ? 'Saving...' : 'Save Deposit'}
+                        {submitting ? (isEdit ? 'Saving...' : 'Saving...') : isEdit ? 'Save Changes' : 'Save Deposit'}
                     </Button>
                 </DialogFooter>
             </form>
@@ -225,7 +257,11 @@ const columns = [
     { key: 'days_balance', label: 'Days Balance' },
 ];
 
-const FixedDepositTable = ({ deposits, sortKey, sortDir, onSort }: any) => {
+// An FD is archived if closed or matured, otherwise active
+const isArchived = (fd: any) => fd.closed === true || fd.matured === true;
+const isActive = (fd: any) => !isArchived(fd);
+
+const FixedDepositTable = ({ deposits, sortKey, sortDir, onSort, onEdit, onClose, onMature }: any) => {
     return (
         <div className="mb-6 hidden w-full overflow-x-auto md:block">
             <table className="min-w-full divide-y divide-gray-200 rounded-lg bg-white text-xs shadow md:text-sm">
@@ -241,6 +277,7 @@ const FixedDepositTable = ({ deposits, sortKey, sortDir, onSort }: any) => {
                                 {sortKey === col.key && <span className="ml-1">{sortDir === 'asc' ? '▲' : '▼'}</span>}
                             </th>
                         ))}
+                        <th className="px-2 py-2">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -257,6 +294,31 @@ const FixedDepositTable = ({ deposits, sortKey, sortDir, onSort }: any) => {
                             <td className="px-2 py-2 whitespace-nowrap">{formatINR(fd.Int_amt)}</td>
                             <td className="px-2 py-2 whitespace-nowrap">{formatINR(fd.Int_year)}</td>
                             <td className="px-2 py-2 whitespace-nowrap">{getDaysBalance(fd.maturity_date)}</td>
+                            <td className="flex gap-2 px-2 py-2 whitespace-nowrap">
+                                {isActive(fd) && (
+                                    <>
+                                        <Button size="icon" variant="ghost" onClick={() => onEdit(fd)} title="Edit">
+                                            <Pencil className="h-4 w-4" />
+                                        </Button>
+                                        <Button size="icon" variant="ghost" onClick={() => onClose(fd)} title="Close">
+                                            <XCircle className="h-4 w-4 text-red-500" />
+                                        </Button>
+                                        {/* Only show Matured button if today >= maturity_date and not already matured/closed */}
+                                        {(() => {
+                                            const today = new Date();
+                                            const maturity = new Date(fd.maturity_date);
+                                            if (today >= maturity) {
+                                                return (
+                                                    <Button size="icon" variant="ghost" onClick={() => onMature(fd)} title="Matured">
+                                                        <CheckCircle className="h-4 w-4 text-green-600" />
+                                                    </Button>
+                                                );
+                                            }
+                                            return null;
+                                        })()}
+                                    </>
+                                )}
+                            </td>
                         </tr>
                     ))}
                 </tbody>
@@ -265,7 +327,7 @@ const FixedDepositTable = ({ deposits, sortKey, sortDir, onSort }: any) => {
     );
 };
 
-const FixedDepositCards = ({ deposits }: any) => {
+const FixedDepositCards = ({ deposits, onEdit, onClose, onMature }: any) => {
     return (
         <div className="mb-6 flex flex-col gap-4 md:hidden">
             {deposits.map((fd: any, idx: number) => (
@@ -304,6 +366,31 @@ const FixedDepositCards = ({ deposits }: any) => {
                                 <span className="font-medium">Days Balance:</span> {getDaysBalance(fd.maturity_date)}
                             </div>
                         </div>
+                        <div className="mt-2 flex gap-2">
+                            {isActive(fd) && (
+                                <>
+                                    <Button size="icon" variant="ghost" onClick={() => onEdit(fd)} title="Edit">
+                                        <Pencil className="h-4 w-4" />
+                                    </Button>
+                                    <Button size="icon" variant="ghost" onClick={() => onClose(fd)} title="Close">
+                                        <XCircle className="h-4 w-4 text-red-500" />
+                                    </Button>
+                                    {/* Only show Matured button if today >= maturity_date and not already matured/closed */}
+                                    {(() => {
+                                        const today = new Date();
+                                        const maturity = new Date(fd.maturity_date);
+                                        if (today >= maturity) {
+                                            return (
+                                                <Button size="icon" variant="ghost" onClick={() => onMature(fd)} title="Matured">
+                                                    <CheckCircle className="h-4 w-4 text-green-600" />
+                                                </Button>
+                                            );
+                                        }
+                                        return null;
+                                    })()}
+                                </>
+                            )}
+                        </div>
                     </CardContent>
                 </Card>
             ))}
@@ -334,10 +421,13 @@ const BankSummaryCards = ({ deposits }: any) => {
     return (
         <div className="mb-6 flex flex-wrap gap-4">
             {summaries.map((summary) => (
-                <Card key={summary.bank} className="min-w-[220px] flex-1 border border-gray-200 bg-gradient-to-br from-blue-50 to-white shadow">
+                <Card
+                    key={String(summary.bank)}
+                    className="min-w-[220px] flex-1 border border-gray-200 bg-gradient-to-br from-blue-50 to-white shadow"
+                >
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-lg">{summary.bank}</CardTitle>
-                        <CardDescription>{summary.count} Deposits</CardDescription>
+                        <CardTitle className="text-lg">{String(summary.bank)}</CardTitle>
+                        <CardDescription>{String(summary.count)} Deposits</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-1 text-sm">
                         <div>
@@ -362,9 +452,16 @@ const FixedDepositsPage = () => {
     const [sortKey, setSortKey] = useState('maturity_date');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
     const [modalOpen, setModalOpen] = useState(false);
+    const [editFD, setEditFD] = useState<any>(null);
+    const [closeFD, setCloseFD] = useState<any>(null);
+    const [matureFD, setMatureFD] = useState<any>(null);
+    const [showMatured, setShowMatured] = useState(false);
+
+    // Filter deposits based on toggle
+    const filteredDeposits = deposits.filter((fd: any) => (showMatured ? isArchived(fd) : isActive(fd)));
 
     // Sort deposits
-    const sortedDeposits = [...deposits].sort((a, b) => {
+    const sortedDeposits = [...filteredDeposits].sort((a, b) => {
         let aVal = a[sortKey];
         let bVal = b[sortKey];
         if (sortKey === 'maturity_date' || sortKey === 'start_date') {
@@ -385,10 +482,65 @@ const FixedDepositsPage = () => {
         }
     };
 
+    // Action handlers
+    const handleEdit = (fd: any) => setEditFD(fd);
+    const handleClose = (fd: any) => setCloseFD(fd);
+    const handleMature = (fd: any) => setMatureFD(fd);
+
+    // Close FD logic
+    const handleConfirmClose = (fdToClose: any) => {
+        const start = new Date(fdToClose.start_date);
+        const today = new Date();
+        const days = Math.ceil((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+
+        let payload: any = {};
+        if (days < 365) {
+            payload.Int_amt = 0;
+            payload.Int_year = 0;
+        }
+        // Backend will set 'closed = true'. We only send interest adjustments.
+
+        router.put(`/fixed-deposits/${fdToClose.id}/close`, payload, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setCloseFD(null); // Close modal first
+                router.reload({ only: ['deposits'] }); // Then reload relevant props
+            },
+            onError: (errors) => {
+                // Optional: Handle errors
+                console.error('Failed to close FD:', errors);
+            },
+            // onFinish: () => { // onFinish can be removed if onSuccess/onError handle modal state
+            // setCloseFD(null); // Now handled in onSuccess
+            // },
+        });
+    };
+
+    // Mature FD logic
+    const handleConfirmMature = (fdToMature: any) => {
+        router.put(
+            `/fixed-deposits/${fdToMature.id}/mature`,
+            {}, // Minimal payload, backend handles setting 'matured'
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    setMatureFD(null); // Close modal first
+                    router.reload({ only: ['deposits'] }); // Then reload relevant props
+                },
+                onError: (errors) => {
+                    // Optional: Handle errors
+                    console.error('Failed to mature FD:', errors);
+                },
+                // onFinish: () => { // onFinish can be removed if onSuccess/onError handle modal state
+                //    setMatureFD(null); // Now handled in onSuccess
+                // },
+            },
+        );
+    };
+
     return (
         <div className="p-4">
-            {/* Bank summary cards at the top */}
-            <BankSummaryCards deposits={sortedDeposits} />
+            {/* Add FD button/modal at the top */}
             <Dialog open={modalOpen} onOpenChange={setModalOpen}>
                 <DialogTrigger asChild>
                     <Button className="mb-4" variant="default">
@@ -397,8 +549,90 @@ const FixedDepositsPage = () => {
                 </DialogTrigger>
                 <AddDepositModal open={modalOpen} setOpen={setModalOpen} />
             </Dialog>
-            <FixedDepositTable deposits={sortedDeposits} sortKey={sortKey} sortDir={sortDir} onSort={handleSort} />
-            <FixedDepositCards deposits={sortedDeposits} />
+            {/* Bank summary cards below Add FD */}
+            <BankSummaryCards deposits={sortedDeposits} />
+            {/* Toggle Switch for Active/Matured below cards */}
+            <div className="mb-4 flex items-center gap-2">
+                <Checkbox id="toggle-matured" checked={showMatured} onCheckedChange={(v) => setShowMatured(v === true)} />
+                <label htmlFor="toggle-matured" className="cursor-pointer text-sm font-medium select-none">
+                    {showMatured ? 'Show Archived FDs' : 'Show Active FDs'}
+                </label>
+            </div>
+            {/* Edit Modal */}
+            {editFD && (
+                <Dialog open={!!editFD} onOpenChange={() => setEditFD(null)}>
+                    <AddDepositModal open={!!editFD} setOpen={() => setEditFD(null)} fd={editFD} isEdit />
+                </Dialog>
+            )}
+            {/* Close Modal */}
+            {closeFD && (
+                <Dialog open={!!closeFD} onOpenChange={() => setCloseFD(null)}>
+                    <DialogContent>
+                        <DialogHeader>
+                            <DialogTitle>Close Fixed Deposit</DialogTitle>
+                        </DialogHeader>
+                        <div>
+                            {(() => {
+                                const start = new Date(closeFD.start_date);
+                                const today = new Date();
+                                const days = Math.ceil((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+                                if (days < 365) {
+                                    return (
+                                        <div className="mb-4 text-red-600">
+                                            No interest will be paid as FD is closed within 1 year. Are you sure you want to close?
+                                        </div>
+                                    );
+                                } else {
+                                    return <div className="mb-4">You can update the FD details before closing. Are you sure you want to close?</div>;
+                                }
+                            })()}
+                        </div>
+                        <DialogFooter>
+                            <DialogClose asChild>
+                                <Button type="button" variant="secondary">
+                                    Cancel
+                                </Button>
+                            </DialogClose>
+                            <Button type="button" onClick={() => handleConfirmClose(closeFD)}>
+                                Confirm Close
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            )}
+            {/* Mature Modal */}
+            {matureFD && (
+                <Dialog open={!!matureFD} onOpenChange={() => setMatureFD(null)}>
+                    <DialogContent>
+                        <DialogHeader>
+                            <DialogTitle>Mature Fixed Deposit</DialogTitle>
+                        </DialogHeader>
+                        <div>Mark this FD as matured?</div>
+                        <DialogFooter>
+                            <DialogClose asChild>
+                                <Button type="button" variant="secondary">
+                                    Cancel
+                                </Button>
+                            </DialogClose>
+                            <Button type="button" onClick={() => handleConfirmMature(matureFD)}>
+                                Mark as Matured
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            )}
+            {/* Table View */}
+            <FixedDepositTable
+                deposits={sortedDeposits}
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onSort={handleSort}
+                onEdit={handleEdit}
+                onClose={handleClose}
+                onMature={handleMature}
+            />
+            {/* Card View */}
+            <FixedDepositCards deposits={sortedDeposits} onEdit={handleEdit} onClose={handleClose} onMature={handleMature} />
         </div>
     );
 };

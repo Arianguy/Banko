@@ -33,4 +33,24 @@ class FixedDepositController extends Controller
         FixedDeposit::create($data);
         return redirect()->route('fixed-deposits');
     }
+
+    // Mark FD as matured
+    public function mature($id, Request $request)
+    {
+        $fd = FixedDeposit::findOrFail($id);
+        $fd->matured = true;
+        $fd->save();
+        return redirect()->route('fixed-deposits');
+    }
+
+    // Mark FD as closed
+    public function close($id, Request $request)
+    {
+        $fd = FixedDeposit::findOrFail($id);
+        $fd->closed = true;
+        if ($request->has('Int_amt')) $fd->Int_amt = $request->Int_amt;
+        if ($request->has('Int_year')) $fd->Int_year = $request->Int_year;
+        $fd->save();
+        return redirect()->route('fixed-deposits');
+    }
 }
