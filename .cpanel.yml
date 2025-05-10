@@ -1,0 +1,11 @@
+---
+deployment:
+  tasks:
+    - export DEPLOYPATH=/home/ashtelgr/banko.ashtelgroup.online
+    - /bin/cp -R * $DEPLOYPATH
+    - cd $DEPLOYPATH
+    - /opt/cpanel/composer/bin/composer install --no-dev --optimize-autoloader
+    - /opt/cpanel/ea-php82/root/usr/bin/php artisan migrate --force
+    - /opt/cpanel/ea-php82/root/usr/bin/php artisan config:cache
+    - /opt/cpanel/ea-php82/root/usr/bin/php artisan route:cache
+    - /opt/cpanel/ea-php82/root/usr/bin/php artisan view:cache
