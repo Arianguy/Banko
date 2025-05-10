@@ -311,6 +311,51 @@ const FixedDepositCards = ({ deposits }: any) => {
     );
 };
 
+const BankSummaryCards = ({ deposits }: any) => {
+    // Group deposits by bank
+    const banks = Array.from(new Set(deposits.map((d: any) => d.bank)));
+    const formatINR = (amount: number) => '₹ ' + Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2 });
+
+    // Calculate summary for each bank
+    const summaries = banks.map((bank) => {
+        const bankDeposits = deposits.filter((d: any) => d.bank === bank);
+        const totalPrincipal = bankDeposits.reduce((sum: number, d: any) => sum + Number(d.principal_amt), 0);
+        const totalMaturity = bankDeposits.reduce((sum: number, d: any) => sum + Number(d.maturity_amt), 0);
+        const totalInterest = bankDeposits.reduce((sum: number, d: any) => sum + Number(d.Int_amt), 0);
+        return {
+            bank,
+            count: bankDeposits.length,
+            totalPrincipal,
+            totalMaturity,
+            totalInterest,
+        };
+    });
+
+    return (
+        <div className="mb-6 flex flex-wrap gap-4">
+            {summaries.map((summary) => (
+                <Card key={summary.bank} className="min-w-[220px] flex-1 border border-gray-200 bg-gradient-to-br from-blue-50 to-white shadow">
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-lg">{summary.bank}</CardTitle>
+                        <CardDescription>{summary.count} Deposits</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-1 text-sm">
+                        <div>
+                            <span className="font-medium">Total Principal:</span> {formatINR(summary.totalPrincipal)}
+                        </div>
+                        <div>
+                            <span className="font-medium">Total Maturity:</span> {formatINR(summary.totalMaturity)}
+                        </div>
+                        <div>
+                            <span className="font-medium">Total Interest:</span> {formatINR(summary.totalInterest)}
+                        </div>
+                    </CardContent>
+                </Card>
+            ))}
+        </div>
+    );
+};
+
 const FixedDepositsPage = () => {
     const { deposits } = usePage().props as any;
     // Sorting state
@@ -342,6 +387,8 @@ const FixedDepositsPage = () => {
 
     return (
         <div className="p-4">
+            {/* Bank summary cards at the top */}
+            <BankSummaryCards deposits={sortedDeposits} />
             <Dialog open={modalOpen} onOpenChange={setModalOpen}>
                 <DialogTrigger asChild>
                     <Button className="mb-4" variant="default">
