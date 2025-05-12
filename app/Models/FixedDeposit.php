@@ -17,5 +17,19 @@ class FixedDeposit extends Model
         'int_rate',
         'Int_amt',
         'Int_year',
+        'matured',
+        'closed',
+    ];
+
+    /**
+     * The attributes that should be cast.
+     *
+     * @var array
+     */
+    protected $casts = [
+        'matured' => 'boolean',
+        'closed' => 'boolean',
+        'start_date' => 'date',
+        'maturity_date' => 'date',
     ];
 }

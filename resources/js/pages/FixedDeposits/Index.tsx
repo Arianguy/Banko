@@ -1,10 +1,11 @@
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
 import { router, usePage } from '@inertiajs/react';
 import { CheckCircle, Pencil, XCircle } from 'lucide-react';
@@ -24,12 +25,23 @@ function getDaysBalance(maturity_date: string) {
 }
 
 const AddDepositModal = ({ open, setOpen, fd, isEdit }: { open: boolean; setOpen: (v: boolean) => void; fd?: any; isEdit?: boolean }) => {
+    // Helper to format date string (YYYY-MM-DDTHH:mm:ss...) to YYYY-MM-DD for input[type=date]
+    const formatDateForInput = (dateString: string | undefined | null) => {
+        if (!dateString) return '';
+        try {
+            return dateString.split('T')[0];
+        } catch (e) {
+            console.error('Error formatting date:', dateString, e);
+            return ''; // Return empty string on error
+        }
+    };
+
     const [bank, setBank] = useState(fd?.bank || 'SBI');
     const [accountno, setAccountno] = useState(fd?.accountno || '');
     const [principal_amt, setPrincipalAmt] = useState(fd?.principal_amt || '');
     const [maturity_amt, setMaturityAmt] = useState(fd?.maturity_amt || '');
-    const [start_date, setStartDate] = useState(fd?.start_date || '');
-    const [maturity_date, setMaturityDate] = useState(fd?.maturity_date || '');
+    const [start_date, setStartDate] = useState(formatDateForInput(fd?.start_date) || '');
+    const [maturity_date, setMaturityDate] = useState(formatDateForInput(fd?.maturity_date) || '');
     const [int_rate, setIntRate] = useState(fd?.int_rate || '');
     const [submitting, setSubmitting] = useState(false);
     const [clientErrors, setClientErrors] = useState<any>({});
@@ -258,26 +270,32 @@ const columns = [
 ];
 
 // An FD is archived if closed or matured, otherwise active
-const isArchived = (fd: any) => fd.closed === true || fd.matured === true;
+const isArchived = (fd: any) => !!fd?.closed || !!fd?.matured; // Use truthiness check after casting
 const isActive = (fd: any) => !isArchived(fd);
 
-const FixedDepositTable = ({ deposits, sortKey, sortDir, onSort, onEdit, onClose, onMature }: any) => {
+const FixedDepositTable = ({ deposits, sortKey, sortDir, onSort, onEdit, onClose, onMature, showArchived }: any) => {
     return (
         <div className="mb-6 hidden w-full overflow-x-auto md:block">
             <table className="min-w-full divide-y divide-gray-200 rounded-lg bg-white text-xs shadow md:text-sm">
                 <thead className="bg-gray-100">
                     <tr>
-                        {columns.map((col) => (
-                            <th
-                                key={col.key}
-                                className="cursor-pointer px-2 py-2 text-left font-semibold select-none"
-                                onClick={() => onSort(col.key)}
-                            >
-                                {col.label}
-                                {sortKey === col.key && <span className="ml-1">{sortDir === 'asc' ? '▲' : '▼'}</span>}
-                            </th>
-                        ))}
-                        <th className="px-2 py-2">Actions</th>
+                        {columns.map((col) => {
+                            if (showArchived && col.key === 'days_balance') {
+                                return null;
+                            }
+                            return (
+                                <th
+                                    key={col.key}
+                                    className="cursor-pointer px-2 py-2 text-left font-semibold select-none"
+                                    onClick={() => onSort(col.key)}
+                                >
+                                    {col.label}
+                                    {sortKey === col.key && <span className="ml-1">{sortDir === 'asc' ? '▲' : '▼'}</span>}
+                                </th>
+                            );
+                        })}
+                        {!showArchived && <th className="px-2 py-2">Actions</th>}
+                        {showArchived && <th className="px-2 py-2 text-left font-semibold">Status</th>}
                     </tr>
                 </thead>
                 <tbody>
@@ -293,32 +311,45 @@ const FixedDepositTable = ({ deposits, sortKey, sortDir, onSort, onEdit, onClose
                             <td className="px-2 py-2 whitespace-nowrap">{Number(fd.int_rate).toFixed(2)}</td>
                             <td className="px-2 py-2 whitespace-nowrap">{formatINR(fd.Int_amt)}</td>
                             <td className="px-2 py-2 whitespace-nowrap">{formatINR(fd.Int_year)}</td>
-                            <td className="px-2 py-2 whitespace-nowrap">{getDaysBalance(fd.maturity_date)}</td>
-                            <td className="flex gap-2 px-2 py-2 whitespace-nowrap">
-                                {isActive(fd) && (
-                                    <>
-                                        <Button size="icon" variant="ghost" onClick={() => onEdit(fd)} title="Edit">
-                                            <Pencil className="h-4 w-4" />
-                                        </Button>
-                                        <Button size="icon" variant="ghost" onClick={() => onClose(fd)} title="Close">
-                                            <XCircle className="h-4 w-4 text-red-500" />
-                                        </Button>
-                                        {/* Only show Matured button if today >= maturity_date and not already matured/closed */}
-                                        {(() => {
-                                            const today = new Date();
-                                            const maturity = new Date(fd.maturity_date);
-                                            if (today >= maturity) {
-                                                return (
-                                                    <Button size="icon" variant="ghost" onClick={() => onMature(fd)} title="Matured">
-                                                        <CheckCircle className="h-4 w-4 text-green-600" />
-                                                    </Button>
-                                                );
-                                            }
-                                            return null;
-                                        })()}
-                                    </>
-                                )}
-                            </td>
+                            {!showArchived && <td className="px-2 py-2 whitespace-nowrap">{getDaysBalance(fd.maturity_date)}</td>}
+                            {!showArchived && (
+                                <td className="flex gap-2 px-2 py-2 whitespace-nowrap">
+                                    {isActive(fd) && (
+                                        <>
+                                            <Button size="icon" variant="ghost" onClick={() => onEdit(fd)} title="Edit">
+                                                <Pencil className="h-4 w-4" />
+                                            </Button>
+                                            <Button size="icon" variant="ghost" onClick={() => onClose(fd)} title="Close">
+                                                <XCircle className="h-4 w-4 text-red-500" />
+                                            </Button>
+                                            {(() => {
+                                                const today = new Date();
+                                                const maturity = new Date(fd.maturity_date);
+                                                today.setHours(0, 0, 0, 0);
+                                                if (today >= maturity) {
+                                                    return (
+                                                        <Button size="icon" variant="ghost" onClick={() => onMature(fd)} title="Matured">
+                                                            <CheckCircle className="h-4 w-4 text-green-600" />
+                                                        </Button>
+                                                    );
+                                                }
+                                                return null;
+                                            })()}
+                                        </>
+                                    )}
+                                </td>
+                            )}
+                            {showArchived && (
+                                <td className="px-2 py-2 whitespace-nowrap">
+                                    {fd.matured ? (
+                                        <Badge variant="default" className="bg-green-600 text-white hover:bg-green-700">
+                                            Matured
+                                        </Badge>
+                                    ) : fd.closed ? (
+                                        <Badge variant="secondary">Closed</Badge>
+                                    ) : null}
+                                </td>
+                            )}
                         </tr>
                     ))}
                 </tbody>
@@ -327,7 +358,7 @@ const FixedDepositTable = ({ deposits, sortKey, sortDir, onSort, onEdit, onClose
     );
 };
 
-const FixedDepositCards = ({ deposits, onEdit, onClose, onMature }: any) => {
+const FixedDepositCards = ({ deposits, onEdit, onClose, onMature, showArchived }: any) => {
     return (
         <div className="mb-6 flex flex-col gap-4 md:hidden">
             {deposits.map((fd: any, idx: number) => (
@@ -337,9 +368,22 @@ const FixedDepositCards = ({ deposits, onEdit, onClose, onMature }: any) => {
                             <CardTitle className="flex min-w-[180px] items-center gap-2">
                                 {fd.bank} <span className="text-xs font-normal text-gray-400">({fd.accountno})</span>
                             </CardTitle>
-                            <CardDescription className="md:ml-auto">
-                                Term: {fd.term} days | Interest: {Number(fd.int_rate).toFixed(2)}%
-                            </CardDescription>
+                            {showArchived && (
+                                <div className="md:ml-auto">
+                                    {fd.matured ? (
+                                        <Badge variant="default" className="bg-green-600 text-white hover:bg-green-700">
+                                            Matured
+                                        </Badge>
+                                    ) : fd.closed ? (
+                                        <Badge variant="secondary">Closed</Badge>
+                                    ) : null}
+                                </div>
+                            )}
+                            {!showArchived && (
+                                <CardDescription className="md:ml-auto">
+                                    Term: {fd.term} days | Interest: {Number(fd.int_rate).toFixed(2)}%
+                                </CardDescription>
+                            )}
                         </div>
                     </CardHeader>
                     <CardContent>
@@ -362,35 +406,39 @@ const FixedDepositCards = ({ deposits, onEdit, onClose, onMature }: any) => {
                             <div className="flex-1 md:w-1/6">
                                 <span className="font-medium">Interest/Year:</span> {formatINR(fd.Int_year)}
                             </div>
-                            <div className="flex-1 md:w-1/6">
-                                <span className="font-medium">Days Balance:</span> {getDaysBalance(fd.maturity_date)}
-                            </div>
-                        </div>
-                        <div className="mt-2 flex gap-2">
-                            {isActive(fd) && (
-                                <>
-                                    <Button size="icon" variant="ghost" onClick={() => onEdit(fd)} title="Edit">
-                                        <Pencil className="h-4 w-4" />
-                                    </Button>
-                                    <Button size="icon" variant="ghost" onClick={() => onClose(fd)} title="Close">
-                                        <XCircle className="h-4 w-4 text-red-500" />
-                                    </Button>
-                                    {/* Only show Matured button if today >= maturity_date and not already matured/closed */}
-                                    {(() => {
-                                        const today = new Date();
-                                        const maturity = new Date(fd.maturity_date);
-                                        if (today >= maturity) {
-                                            return (
-                                                <Button size="icon" variant="ghost" onClick={() => onMature(fd)} title="Matured">
-                                                    <CheckCircle className="h-4 w-4 text-green-600" />
-                                                </Button>
-                                            );
-                                        }
-                                        return null;
-                                    })()}
-                                </>
+                            {!showArchived && (
+                                <div className="flex-1 md:w-1/6">
+                                    <span className="font-medium">Days Balance:</span> {getDaysBalance(fd.maturity_date)}
+                                </div>
                             )}
                         </div>
+                        {!showArchived && (
+                            <div className="mt-2 flex gap-2">
+                                {isActive(fd) && (
+                                    <>
+                                        <Button size="icon" variant="ghost" onClick={() => onEdit(fd)} title="Edit">
+                                            <Pencil className="h-4 w-4" />
+                                        </Button>
+                                        <Button size="icon" variant="ghost" onClick={() => onClose(fd)} title="Close">
+                                            <XCircle className="h-4 w-4 text-red-500" />
+                                        </Button>
+                                        {(() => {
+                                            const today = new Date();
+                                            const maturity = new Date(fd.maturity_date);
+                                            today.setHours(0, 0, 0, 0);
+                                            if (today >= maturity) {
+                                                return (
+                                                    <Button size="icon" variant="ghost" onClick={() => onMature(fd)} title="Matured">
+                                                        <CheckCircle className="h-4 w-4 text-green-600" />
+                                                    </Button>
+                                                );
+                                            }
+                                            return null;
+                                        })()}
+                                    </>
+                                )}
+                            </div>
+                        )}
                     </CardContent>
                 </Card>
             ))}
@@ -457,7 +505,7 @@ const FixedDepositsPage = () => {
     const [matureFD, setMatureFD] = useState<any>(null);
     const [showMatured, setShowMatured] = useState(false);
 
-    // Filter deposits based on toggle
+    // Filter deposits based on toggle - Use explicit boolean check
     const filteredDeposits = deposits.filter((fd: any) => (showMatured ? isArchived(fd) : isActive(fd)));
 
     // Sort deposits
@@ -551,9 +599,9 @@ const FixedDepositsPage = () => {
             </Dialog>
             {/* Bank summary cards below Add FD */}
             <BankSummaryCards deposits={sortedDeposits} />
-            {/* Toggle Switch for Active/Matured below cards */}
+            {/* Toggle Switch for Active/Archived below cards */}
             <div className="mb-4 flex items-center gap-2">
-                <Checkbox id="toggle-matured" checked={showMatured} onCheckedChange={(v) => setShowMatured(v === true)} />
+                <Switch id="toggle-matured" checked={showMatured} onCheckedChange={setShowMatured} />
                 <label htmlFor="toggle-matured" className="cursor-pointer text-sm font-medium select-none">
                     {showMatured ? 'Show Archived FDs' : 'Show Active FDs'}
                 </label>
@@ -621,7 +669,7 @@ const FixedDepositsPage = () => {
                     </DialogContent>
                 </Dialog>
             )}
-            {/* Table View */}
+            {/* Table View - Pass showMatured prop */}
             <FixedDepositTable
                 deposits={sortedDeposits}
                 sortKey={sortKey}
@@ -630,9 +678,16 @@ const FixedDepositsPage = () => {
                 onEdit={handleEdit}
                 onClose={handleClose}
                 onMature={handleMature}
+                showArchived={showMatured}
             />
-            {/* Card View */}
-            <FixedDepositCards deposits={sortedDeposits} onEdit={handleEdit} onClose={handleClose} onMature={handleMature} />
+            {/* Card View - Pass showMatured prop */}
+            <FixedDepositCards
+                deposits={sortedDeposits}
+                onEdit={handleEdit}
+                onClose={handleClose}
+                onMature={handleMature}
+                showArchived={showMatured}
+            />
         </div>
     );
 };

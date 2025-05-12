@@ -53,4 +53,24 @@ class FixedDepositController extends Controller
         $fd->save();
         return redirect()->route('fixed-deposits');
     }
+
+    // Update FD details
+    public function update($id, Request $request)
+    {
+        $fd = FixedDeposit::findOrFail($id);
+        $data = $request->validate([
+            'bank' => 'required|string',
+            'accountno' => 'required|string',
+            'principal_amt' => 'required|numeric',
+            'maturity_amt' => 'required|numeric',
+            'start_date' => 'required|date',
+            'maturity_date' => 'required|date',
+            'term' => 'required|integer',
+            'int_rate' => 'required|numeric',
+            'Int_amt' => 'required|numeric',
+            'Int_year' => 'required|numeric',
+        ]);
+        $fd->update($data);
+        return redirect()->route('fixed-deposits');
+    }
 }
