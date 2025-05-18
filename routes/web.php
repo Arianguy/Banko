@@ -3,6 +3,7 @@
 use Inertia\Inertia;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\FixedDepositController;
+use App\Http\Controllers\BankController;
 
 Route::get('/', function () {
     return Inertia::render('welcome');
@@ -22,7 +23,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('fixed-deposits', [FixedDepositController::class, 'store'])->name('fixed-deposits.store');
         Route::put('fixed-deposits/{id}/mature', [FixedDepositController::class, 'mature'])->name('fixed-deposits.mature');
         Route::put('fixed-deposits/{id}/close', [FixedDepositController::class, 'close'])->name('fixed-deposits.close');
-        Route::put('fixed-deposits/{id}', [FixedDepositController::class, 'update'])->name('fixed-deposits.update');
+        Route::put('fixed-deposits/{id}', [FixedDepositController::class, 'update'])->name('fixed-deposits.update');        
+        Route::post('/banks', [BankController::class, 'store']);
+        Route::get('/banks', [BankController::class, 'index']);
     });
 });
 

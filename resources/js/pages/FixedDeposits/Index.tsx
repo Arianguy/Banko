@@ -11,11 +11,7 @@ import { router, usePage } from '@inertiajs/react';
 import { CheckCircle, Pencil, XCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-const BANKS = [
-    { value: 'SBI', label: 'SBI' },
-    { value: 'ICICI', label: 'ICICI' },
-    { value: 'HDFC', label: 'HDFC' },
-];
+// BANKS are now dynamic from the backend, not hardcoded.
 
 function getDaysBalance(maturity_date: string) {
     const today = new Date();
@@ -24,36 +20,51 @@ function getDaysBalance(maturity_date: string) {
     return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
 
-const AddDepositModal = ({ open, setOpen, fd, isEdit }: { open: boolean; setOpen: (v: boolean) => void; fd?: any; isEdit?: boolean }) => {
+const AddDepositModal = ({ open, setOpen, fd, isEdit, banks, onAddBank }: { open: boolean; setOpen: (v: boolean) => void; fd?: any; isEdit?: boolean, banks: Array<{ id: number, name: string }>, onAddBank: (name: string) => void }) => {
     // Helper to format date string (YYYY-MM-DDTHH:mm:ss...) to YYYY-MM-DD for input[type=date]
-    const formatDateForInput = (dateString: string | undefined | null) => {
+    // Format JS Date or string to DD/MM/YYYY
+    const formatDateDDMMYYYY = (dateString: string | undefined | null): string => {
         if (!dateString) return '';
-        try {
-            return dateString.split('T')[0];
-        } catch (e) {
-            console.error('Error formatting date:', dateString, e);
-            return ''; // Return empty string on error
-        }
+        const date = new Date(dateString);
+        if (isNaN(date.getTime())) return '';
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        return `${day}/${month}/${year}`;
     };
 
-    const [bank, setBank] = useState(fd?.bank || 'SBI');
+    // Parse DD/MM/YYYY to YYYY-MM-DD
+    const parseDateFromDDMMYYYY = (ddmmyyyy: string): string => {
+        const [day, month, year] = ddmmyyyy.split('/');
+        if (!day || !month || !year) return '';
+        return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    };
+
+    const [bank, setBank] = useState(fd?.bank || (banks[0]?.name || ''));
     const [accountno, setAccountno] = useState(fd?.accountno || '');
     const [principal_amt, setPrincipalAmt] = useState(fd?.principal_amt || '');
     const [maturity_amt, setMaturityAmt] = useState(fd?.maturity_amt || '');
-    const [start_date, setStartDate] = useState(formatDateForInput(fd?.start_date) || '');
-    const [maturity_date, setMaturityDate] = useState(formatDateForInput(fd?.maturity_date) || '');
+    // Use YYYY-MM-DD for input[type=date]
+    const [start_date, setStartDate] = useState(fd?.start_date ? fd.start_date.slice(0, 10) : '');
+    const [maturity_date, setMaturityDate] = useState(fd?.maturity_date ? fd.maturity_date.slice(0, 10) : '');
     const [int_rate, setIntRate] = useState(fd?.int_rate || '');
     const [submitting, setSubmitting] = useState(false);
     const [clientErrors, setClientErrors] = useState<any>({});
     const { errors } = usePage().props as any;
 
+    // Add Bank Modal state
+    const [addBankModal, setAddBankModal] = useState(false);
+    const [newBankName, setNewBankName] = useState('');
+    const [addBankError, setAddBankError] = useState('');
+
     // Calculate term (days) from start_date and maturity_date
     let term = '';
     if (start_date && maturity_date) {
-        const start = new Date(start_date);
-        const end = new Date(maturity_date);
-        const diff = end.getTime() - start.getTime();
-        term = diff > 0 ? Math.ceil(diff / (1000 * 60 * 60 * 24)).toString() : '';
+        const d1 = new Date(start_date);
+        const d2 = new Date(maturity_date);
+        if (!isNaN(d1.getTime()) && !isNaN(d2.getTime())) {
+            term = Math.ceil((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24)).toString();
+        }
     }
 
     // Calculated fields
@@ -161,19 +172,52 @@ const AddDepositModal = ({ open, setOpen, fd, isEdit }: { open: boolean; setOpen
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div>
                         <Label>Bank</Label>
-                        <Select value={bank} onValueChange={setBank}>
-                            <SelectTrigger>
-                                <SelectValue placeholder="Select bank" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {BANKS.map((b) => (
-                                    <SelectItem key={b.value} value={b.value}>
-                                        {b.label}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                            <Select value={bank} onValueChange={setBank}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Select Bank" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {banks.map((b) => (
+                                        <SelectItem key={b.id} value={b.name}>
+                                            {b.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <Button type="button" size="sm" onClick={() => setAddBankModal(true)}>
+                                + Add Bank
+                            </Button>
+                        </div>
                         {(clientErrors.bank || errors?.bank) && <div className="mt-1 text-xs text-red-500">{clientErrors.bank || errors?.bank}</div>}
+                        {/* Add Bank Modal */}
+                        {addBankModal && (
+                            <Dialog open={addBankModal} onOpenChange={setAddBankModal}>
+                                <DialogContent>
+                                    <DialogHeader>
+                                        <DialogTitle>Add New Bank</DialogTitle>
+                                    </DialogHeader>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                        <Label>Bank Name</Label>
+                                        <Input value={newBankName} onChange={e => setNewBankName(e.target.value)} placeholder="Enter bank name" />
+                                        {addBankError && <div className="text-xs text-red-500">{addBankError}</div>}
+                                    </div>
+                                    <DialogFooter>
+                                        <Button type="button" variant="secondary" onClick={() => { setAddBankModal(false); setNewBankName(''); setAddBankError(''); }}>Cancel</Button>
+                                        <Button type="button" onClick={() => {
+                                            if (!newBankName.trim()) {
+                                                setAddBankError('Bank name is required');
+                                                return;
+                                            }
+                                            onAddBank(newBankName.trim());
+                                            setAddBankModal(false);
+                                            setNewBankName('');
+                                            setAddBankError('');
+                                        }}>Add</Button>
+                                    </DialogFooter>
+                                </DialogContent>
+                            </Dialog>
+                        )}
                     </div>
                     <div>
                         <Label>Account No</Label>
@@ -198,21 +242,37 @@ const AddDepositModal = ({ open, setOpen, fd, isEdit }: { open: boolean; setOpen
                     </div>
                     <div>
                         <Label>Start Date</Label>
-                        <Input type="date" value={start_date} onChange={(e) => setStartDate(e.target.value)} />
+                        <Input
+                            value={start_date}
+                            onChange={e => setStartDate(e.target.value)}
+                            type="date"
+                            disabled={submitting}
+                        />
                         {(clientErrors.start_date || errors?.start_date) && (
                             <div className="mt-1 text-xs text-red-500">{clientErrors.start_date || errors?.start_date}</div>
                         )}
                     </div>
                     <div>
                         <Label>Maturity Date</Label>
-                        <Input type="date" value={maturity_date} onChange={(e) => setMaturityDate(e.target.value)} />
+                        <Input
+                            value={maturity_date}
+                            onChange={e => setMaturityDate(e.target.value)}
+                            type="date"
+                            disabled={submitting}
+                        />
                         {(clientErrors.maturity_date || errors?.maturity_date) && (
                             <div className="mt-1 text-xs text-red-500">{clientErrors.maturity_date || errors?.maturity_date}</div>
                         )}
                     </div>
                     <div>
                         <Label>Term (days)</Label>
-                        <Input value={term} readOnly placeholder="Term in days" />
+                        <Input
+                            value={term}
+                            placeholder="Term in days"
+                            type="text"
+                            inputMode="numeric"
+                            disabled
+                        />
                         {(clientErrors.term || errors?.term) && <div className="mt-1 text-xs text-red-500">{clientErrors.term || errors?.term}</div>}
                     </div>
                     <div>
@@ -495,7 +555,32 @@ const BankSummaryCards = ({ deposits }: any) => {
 };
 
 const FixedDepositsPage = () => {
-    const { deposits } = usePage().props as any;
+    const { deposits, banks: banksProp } = usePage().props as any;
+    const [banks, setBanks] = useState(banksProp || []);
+
+    // Add new bank handler
+    const handleAddBank = async (name: string) => {
+        try {
+            const response = await fetch('/banks', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content || '',
+                },
+                body: JSON.stringify({ name }),
+            });
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.message || 'Failed to add bank');
+            }
+            const newBank = await response.json();
+            setBanks((prev: any) => [...prev, newBank]);
+        } catch (err: any) {
+            alert(err.message || 'Failed to add bank');
+        }
+    };
+
     // Sorting state
     const [sortKey, setSortKey] = useState('maturity_date');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -595,7 +680,7 @@ const FixedDepositsPage = () => {
                         + Add New Deposit
                     </Button>
                 </DialogTrigger>
-                <AddDepositModal open={modalOpen} setOpen={setModalOpen} />
+                <AddDepositModal open={modalOpen} setOpen={setModalOpen} banks={banks} onAddBank={handleAddBank} />
             </Dialog>
             {/* Bank summary cards below Add FD */}
             <BankSummaryCards deposits={sortedDeposits} />
@@ -609,7 +694,7 @@ const FixedDepositsPage = () => {
             {/* Edit Modal */}
             {editFD && (
                 <Dialog open={!!editFD} onOpenChange={() => setEditFD(null)}>
-                    <AddDepositModal open={!!editFD} setOpen={() => setEditFD(null)} fd={editFD} isEdit />
+                    <AddDepositModal open={!!editFD} setOpen={() => setEditFD(null)} fd={editFD} isEdit banks={banks} onAddBank={handleAddBank} />
                 </Dialog>
             )}
             {/* Close Modal */}

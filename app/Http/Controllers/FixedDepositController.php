@@ -11,8 +11,10 @@ class FixedDepositController extends Controller
     public function index()
     {
         $deposits = FixedDeposit::orderByDesc('id')->get();
+        $banks = \App\Models\Bank::orderBy('name')->get();
         return Inertia::render('FixedDeposits/Index', [
             'deposits' => $deposits,
+            'banks' => $banks,
         ]);
     }
 
