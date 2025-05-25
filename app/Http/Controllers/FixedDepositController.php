@@ -32,7 +32,8 @@ class FixedDepositController extends Controller
             'Int_amt' => 'required|numeric',
             'Int_year' => 'required|numeric',
         ]);
-        FixedDeposit::create($data);
+        // FixedDeposit::create($data); // Old way
+        $request->user()->fixedDeposits()->create($data); // New way using relationship
         return redirect()->route('fixed-deposits');
     }
 
