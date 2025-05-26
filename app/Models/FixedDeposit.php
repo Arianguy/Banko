@@ -2,11 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 
 class FixedDeposit extends Model
 {
     protected $fillable = [
+        'user_id',
         'bank',
         'accountno',
         'principal_amt',
@@ -20,6 +22,11 @@ class FixedDeposit extends Model
         'matured',
         'closed',
     ];
+
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
 
     /**
      * The attributes that should be cast.

@@ -25,6 +25,7 @@ return new class extends Migration
             $table->decimal('Int_year', 15, 2)->default(0);
             $table->boolean('matured')->default(false);
             $table->boolean('closed')->default(false);
+            $table->foreignIdFor(\App\Models\User::class)->constrained()->cascadeOnDelete();
             $table->timestamps();
         });
     }

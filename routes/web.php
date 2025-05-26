@@ -4,6 +4,7 @@ use Inertia\Inertia;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\FixedDepositController;
 use App\Http\Controllers\BankController;
+use App\Http\Controllers\PortfolioController;
 
 Route::get('/', function () {
     return Inertia::render('welcome');
@@ -18,6 +19,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
         return Inertia::render('FixedDeposits/Index');
     })->name('fixed-deposits');
 
+    Route::get('/portfolio-summary', function () {
+        return Inertia::render('Portfolio/Summary');
+    })->name('portfolio.summary');
+
     Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('fixed-deposits', [FixedDepositController::class, 'index'])->name('fixed-deposits');
         Route::post('fixed-deposits', [FixedDepositController::class, 'store'])->name('fixed-deposits.store');
@@ -26,6 +31,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::put('fixed-deposits/{id}', [FixedDepositController::class, 'update'])->name('fixed-deposits.update');        
         Route::post('/banks', [BankController::class, 'store']);
         Route::get('/banks', [BankController::class, 'index']);
+
+        // Portfolio Routes
+        Route::get('/api/portfolio/summary-metrics', [PortfolioController::class, 'getSummaryMetrics'])->name('api.portfolio.summary');
+        Route::get('/api/portfolio/bank-distribution', [PortfolioController::class, 'getBankDistribution'])->name('api.portfolio.bankDistribution');
+        Route::get('/api/portfolio/maturity-year-breakdown', [PortfolioController::class, 'getMaturityYearBreakdown'])->name('api.portfolio.maturityBreakdown');
     });
 });
 
