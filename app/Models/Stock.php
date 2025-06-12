@@ -16,12 +16,16 @@ class Stock extends Model
         'current_price',
         'day_change',
         'day_change_percent',
+        'week_52_high',
+        'week_52_low',
     ];
 
     protected $casts = [
         'current_price' => 'decimal:2',
         'day_change' => 'decimal:2',
         'day_change_percent' => 'decimal:2',
+        'week_52_high' => 'decimal:2',
+        'week_52_low' => 'decimal:2',
     ];
 
     public function transactions(): HasMany

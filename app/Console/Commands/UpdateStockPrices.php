@@ -174,20 +174,42 @@ class UpdateStockPrices extends Command
                 $data = $response->json();
 
                 if (isset($data['chart']['result'][0]['meta']['regularMarketPrice'])) {
-                    $currentPrice = floatval($data['chart']['result'][0]['meta']['regularMarketPrice']);
-                    $previousClose = floatval($data['chart']['result'][0]['meta']['previousClose'] ?? $currentPrice);
+                    $meta = $data['chart']['result'][0]['meta'];
+
+                    $currentPrice = floatval($meta['regularMarketPrice']);
+                    $previousClose = floatval($meta['previousClose'] ?? $currentPrice);
+
+                    // Extract 52-week high/low data
+                    $fiftyTwoWeekHigh = floatval($meta['fiftyTwoWeekHigh'] ?? 0);
+                    $fiftyTwoWeekLow = floatval($meta['fiftyTwoWeekLow'] ?? 0);
 
                     $change = $currentPrice - $previousClose;
                     $changePercent = $previousClose > 0 ? ($change / $previousClose) * 100 : 0;
 
                     if ($currentPrice > 0) {
-                        $stock->update([
+                        $updateData = [
                             'current_price' => $currentPrice,
                             'day_change' => $change,
                             'day_change_percent' => $changePercent,
-                        ]);
+                        ];
 
-                        return ['price' => $currentPrice, 'change' => $change, 'change_percent' => $changePercent];
+                        // Only update 52-week data if it's available and valid
+                        if ($fiftyTwoWeekHigh > 0) {
+                            $updateData['week_52_high'] = $fiftyTwoWeekHigh;
+                        }
+                        if ($fiftyTwoWeekLow > 0) {
+                            $updateData['week_52_low'] = $fiftyTwoWeekLow;
+                        }
+
+                        $stock->update($updateData);
+
+                        return [
+                            'price' => $currentPrice,
+                            'change' => $change,
+                            'change_percent' => $changePercent,
+                            'week_52_high' => $fiftyTwoWeekHigh,
+                            'week_52_low' => $fiftyTwoWeekLow
+                        ];
                     }
                 }
             }

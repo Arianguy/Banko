@@ -46,6 +46,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/equity-holding/{stockId}/transactions', [EquityHoldingController::class, 'getTransactions'])->name('equity-holding.transactions');
         Route::get('/equity-holding/{stockId}/holding-info', [EquityHoldingController::class, 'getHoldingInfo'])->name('equity-holding.holding-info');
         Route::get('/equity-holding/search-stocks', [EquityHoldingController::class, 'searchStocks'])->name('equity-holding.search-stocks');
+        Route::get('/equity-holding/sold-history', [EquityHoldingController::class, 'getSoldHistory'])->name('equity-holding.sold-history');
     });
 });
 

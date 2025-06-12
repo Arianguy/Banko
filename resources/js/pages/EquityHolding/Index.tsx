@@ -14,24 +14,53 @@ function formatINR(amount: number) {
 }
 
 const AddTransactionModal = ({ open, setOpen, sellData = null }: { open: boolean; setOpen: (v: boolean) => void; sellData?: any }) => {
-    const [transactionType, setTransactionType] = useState(sellData ? 'sell' : 'buy');
-    const [stockName, setStockName] = useState(sellData ? sellData.stock.symbol : '');
-    const [selectedStock, setSelectedStock] = useState<any>(sellData ? sellData.stock : null);
+    const [transactionType, setTransactionType] = useState('buy');
+    const [stockName, setStockName] = useState('');
+    const [selectedStock, setSelectedStock] = useState<any>(null);
     const [stockSuggestions, setStockSuggestions] = useState<any[]>([]);
     const [showSuggestions, setShowSuggestions] = useState(false);
-    const [exchange, setExchange] = useState(sellData ? sellData.stock.exchange : '');
+    const [exchange, setExchange] = useState('');
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]); // Today's date
     const [quantity, setQuantity] = useState('');
-    const [pricePerStock, setPricePerStock] = useState(sellData ? sellData.current_price?.toString() || '' : '');
+    const [pricePerStock, setPricePerStock] = useState('');
     const [broker, setBroker] = useState('Zerodha'); // Default broker
     const [totalCharges, setTotalCharges] = useState('');
     const [netAmount, setNetAmount] = useState('');
     const [notes, setNotes] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [searchLoading, setSearchLoading] = useState(false);
-    const [maxQuantity, setMaxQuantity] = useState(sellData ? sellData.current_quantity : null);
+    const [maxQuantity, setMaxQuantity] = useState<number | null>(null);
 
     const { errors } = usePage().props as any;
+
+    // Update form when sellData changes
+    React.useEffect(() => {
+        if (sellData) {
+            setTransactionType('sell');
+            setStockName(sellData.stock.symbol);
+            setSelectedStock(sellData.stock);
+            setExchange(sellData.stock.exchange);
+            setPricePerStock(sellData.current_price?.toString() || '');
+            setMaxQuantity(sellData.current_quantity);
+            // Reset other fields for sell
+            setQuantity('');
+            setTotalCharges('');
+            setNetAmount('');
+            setNotes('');
+        } else {
+            // Reset to default state for new transaction
+            setTransactionType('buy');
+            setStockName('');
+            setSelectedStock(null);
+            setExchange('');
+            setPricePerStock('');
+            setMaxQuantity(null);
+            setQuantity('');
+            setTotalCharges('');
+            setNetAmount('');
+            setNotes('');
+        }
+    }, [sellData]);
 
     // Search stocks as user types
     const searchStocks = async (query: string) => {
@@ -268,7 +297,7 @@ const AddTransactionModal = ({ open, setOpen, sellData = null }: { open: boolean
                             }}
                             type="number"
                             placeholder={transactionType === 'sell' ? `Max ${maxQuantity || 0} shares` : '100'}
-                            max={transactionType === 'sell' ? maxQuantity : undefined}
+                            max={transactionType === 'sell' ? maxQuantity || undefined : undefined}
                             disabled={submitting || (transactionType === 'sell' && !selectedStock)}
                             required
                         />
@@ -952,6 +981,111 @@ const HoldingsCards = ({ holdings, openSellModal }: { holdings: any[]; openSellM
     );
 };
 
+const SoldHistoryTable = ({ soldHistory }: { soldHistory: any[] }) => {
+    if (soldHistory.length === 0) {
+        return (
+            <Card className="mb-6">
+                <CardContent className="p-6 text-center">
+                    <p className="text-gray-500">No sold transactions found.</p>
+                </CardContent>
+            </Card>
+        );
+    }
+
+    return (
+        <Card className="mb-6">
+            <CardHeader>
+                <CardTitle className="text-lg font-semibold">Sold Transactions History</CardTitle>
+                <p className="text-sm text-gray-600">Complete history of sold positions with ROI details</p>
+            </CardHeader>
+            <CardContent>
+                <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200 text-sm">
+                        <thead className="bg-gray-50">
+                            <tr>
+                                <th className="px-4 py-3 text-left font-medium text-gray-900">Stock</th>
+                                <th className="px-4 py-3 text-left font-medium text-gray-900">Sell Date</th>
+                                <th className="px-4 py-3 text-right font-medium text-gray-900">Quantity</th>
+                                <th className="px-4 py-3 text-right font-medium text-gray-900">Avg Buy Price</th>
+                                <th className="px-4 py-3 text-right font-medium text-gray-900">Sell Price</th>
+                                <th className="px-4 py-3 text-right font-medium text-gray-900">Investment</th>
+                                <th className="px-4 py-3 text-right font-medium text-gray-900">Sale Proceeds</th>
+                                <th className="px-4 py-3 text-right font-medium text-gray-900">Realized P&L</th>
+                                <th className="px-4 py-3 text-right font-medium text-gray-900">ROI %</th>
+                                <th className="px-4 py-3 text-right font-medium text-gray-900">Days Held</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 bg-white">
+                            {soldHistory.map((transaction, index) => (
+                                <tr key={index} className="hover:bg-gray-50">
+                                    <td className="px-4 py-3">
+                                        <div>
+                                            <div className="font-medium text-gray-900">{transaction.symbol}</div>
+                                            <div className="text-xs text-gray-500">{transaction.stock_name}</div>
+                                        </div>
+                                    </td>
+                                    <td className="px-4 py-3 text-gray-900">{new Date(transaction.sell_date).toLocaleDateString('en-IN')}</td>
+                                    <td className="px-4 py-3 text-right text-gray-900">{transaction.quantity}</td>
+                                    <td className="px-4 py-3 text-right text-gray-900">{formatINR(transaction.avg_buy_price)}</td>
+                                    <td className="px-4 py-3 text-right text-gray-900">{formatINR(transaction.sell_price)}</td>
+                                    <td className="px-4 py-3 text-right text-gray-900">{formatINR(transaction.total_investment)}</td>
+                                    <td className="px-4 py-3 text-right text-gray-900">{formatINR(transaction.sale_proceeds)}</td>
+                                    <td
+                                        className={`px-4 py-3 text-right font-medium ${
+                                            transaction.realized_pl >= 0 ? 'text-green-600' : 'text-red-600'
+                                        }`}
+                                    >
+                                        {transaction.realized_pl >= 0 ? '+' : ''}
+                                        {formatINR(transaction.realized_pl)}
+                                    </td>
+                                    <td
+                                        className={`px-4 py-3 text-right font-medium ${
+                                            transaction.roi_percent >= 0 ? 'text-green-600' : 'text-red-600'
+                                        }`}
+                                    >
+                                        {transaction.roi_percent >= 0 ? '+' : ''}
+                                        {transaction.roi_percent.toFixed(2)}%
+                                    </td>
+                                    <td className="px-4 py-3 text-right text-gray-900">{transaction.days_held}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* Summary Row */}
+                <div className="mt-4 border-t pt-4">
+                    <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+                        <div className="text-center">
+                            <div className="text-sm text-gray-500">Total Transactions</div>
+                            <div className="text-lg font-semibold">{soldHistory.length}</div>
+                        </div>
+                        <div className="text-center">
+                            <div className="text-sm text-gray-500">Total Investment</div>
+                            <div className="text-lg font-semibold">{formatINR(soldHistory.reduce((sum, t) => sum + t.total_investment, 0))}</div>
+                        </div>
+                        <div className="text-center">
+                            <div className="text-sm text-gray-500">Total Proceeds</div>
+                            <div className="text-lg font-semibold">{formatINR(soldHistory.reduce((sum, t) => sum + t.sale_proceeds, 0))}</div>
+                        </div>
+                        <div className="text-center">
+                            <div className="text-sm text-gray-500">Total Realized P&L</div>
+                            <div
+                                className={`text-lg font-semibold ${
+                                    soldHistory.reduce((sum, t) => sum + t.realized_pl, 0) >= 0 ? 'text-green-600' : 'text-red-600'
+                                }`}
+                            >
+                                {soldHistory.reduce((sum, t) => sum + t.realized_pl, 0) >= 0 ? '+' : ''}
+                                {formatINR(soldHistory.reduce((sum, t) => sum + t.realized_pl, 0))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </CardContent>
+        </Card>
+    );
+};
+
 const EquityHoldingPage = () => {
     const { holdings, portfolioMetrics } = usePage().props as any;
     const [modalOpen, setModalOpen] = useState(false);
@@ -960,6 +1094,8 @@ const EquityHoldingPage = () => {
     const [syncing, setSyncing] = useState(false);
     const [sellModalOpen, setSellModalOpen] = useState(false);
     const [sellData, setSellData] = useState<any>(null);
+    const [showHistory, setShowHistory] = useState(false);
+    const [soldHistory, setSoldHistory] = useState<any[]>([]);
 
     // Calculate summary
     const totalInvestment = holdings.reduce((sum: number, h: any) => sum + h.total_investment, 0);
@@ -988,54 +1124,90 @@ const EquityHoldingPage = () => {
         }
     };
 
+    const fetchSoldHistory = async () => {
+        try {
+            const response = await fetch('/equity-holding/sold-history');
+            if (response.ok) {
+                const data = await response.json();
+                setSoldHistory(data);
+            } else {
+                console.error('Failed to fetch sold history');
+            }
+        } catch (error) {
+            console.error('Error fetching sold history:', error);
+        }
+    };
+
+    // Fetch sold history when history toggle is enabled
+    React.useEffect(() => {
+        if (showHistory) {
+            fetchSoldHistory();
+        }
+    }, [showHistory]);
+
     return (
         <div className="p-4">
             {/* Action buttons at the top */}
-            <div className="mb-4 flex gap-3">
-                <Dialog open={modalOpen} onOpenChange={setModalOpen}>
-                    <DialogTrigger asChild>
-                        <Button variant="default">
-                            <Plus className="mr-2 h-4 w-4" />
-                            Add Transaction
-                        </Button>
-                    </DialogTrigger>
-                    <AddTransactionModal open={modalOpen} setOpen={setModalOpen} />
-                </Dialog>
+            <div className="mb-4 flex items-center justify-between">
+                <div className="flex gap-3">
+                    <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+                        <DialogTrigger asChild>
+                            <Button variant="default">
+                                <Plus className="mr-2 h-4 w-4" />
+                                Add Transaction
+                            </Button>
+                        </DialogTrigger>
+                        <AddTransactionModal open={modalOpen} setOpen={setModalOpen} />
+                    </Dialog>
 
-                <Button
-                    variant="outline"
-                    className="border-blue-200 text-blue-700 hover:bg-blue-50"
-                    disabled={syncing}
-                    onClick={() => {
-                        setSyncing(true);
-                        router.post(
-                            '/equity-holding/sync-prices',
-                            {},
-                            {
-                                onSuccess: () => {
-                                    setSyncing(false);
-                                    // You can add a toast notification here if you have one
-                                    alert('✅ Stock prices synced successfully!');
+                    <Button
+                        variant="outline"
+                        className="border-blue-200 text-blue-700 hover:bg-blue-50"
+                        disabled={syncing}
+                        onClick={() => {
+                            setSyncing(true);
+                            router.post(
+                                '/equity-holding/sync-prices',
+                                {},
+                                {
+                                    onSuccess: () => {
+                                        setSyncing(false);
+                                        // You can add a toast notification here if you have one
+                                        alert('✅ Stock prices synced successfully!');
+                                    },
+                                    onError: (error) => {
+                                        setSyncing(false);
+                                        console.error('Sync error:', error);
+                                        alert('❌ Failed to sync stock prices. Please try again.');
+                                    },
                                 },
-                                onError: (error) => {
-                                    setSyncing(false);
-                                    console.error('Sync error:', error);
-                                    alert('❌ Failed to sync stock prices. Please try again.');
-                                },
-                            },
-                        );
-                    }}
-                >
-                    <svg className={`mr-2 h-4 w-4 ${syncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            );
+                        }}
+                    >
+                        <svg className={`mr-2 h-4 w-4 ${syncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                            />
+                        </svg>
+                        {syncing ? 'Syncing...' : 'Sync Prices'}
+                    </Button>
+                </div>
+
+                {/* History Toggle */}
+                <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 text-sm font-medium">
+                        <input
+                            type="checkbox"
+                            checked={showHistory}
+                            onChange={(e) => setShowHistory(e.target.checked)}
+                            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                         />
-                    </svg>
-                    {syncing ? 'Syncing...' : 'Sync Prices'}
-                </Button>
+                        Show Sold History
+                    </label>
+                </div>
             </div>
 
             {/* Summary Cards */}
@@ -1138,19 +1310,22 @@ const EquityHoldingPage = () => {
                 </Card>
             </div>
 
+            {/* Sold History Table */}
+            {showHistory && <SoldHistoryTable soldHistory={soldHistory} />}
+
             {/* Holdings Table */}
-            {holdings.length > 0 ? (
+            {!showHistory && holdings.length > 0 ? (
                 <>
                     <HoldingsTable holdings={holdings} openEditModal={openEditModal} openSellModal={openSellModal} />
                     <HoldingsCards holdings={holdings} openSellModal={openSellModal} />
                 </>
-            ) : (
+            ) : !showHistory ? (
                 <Card>
                     <CardContent className="p-6 text-center">
                         <p className="text-gray-500">No equity holdings found. Add your first transaction to get started.</p>
                     </CardContent>
                 </Card>
-            )}
+            ) : null}
 
             {/* Edit Transaction Modal */}
             <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>

@@ -150,6 +150,62 @@ class EquityHoldingController extends Controller
         ]);
     }
 
+    public function getSoldHistory()
+    {
+        $user = Auth::user();
+
+        // Get all sell transactions with stock details
+        $sellTransactions = StockTransaction::with('stock')
+            ->where('user_id', $user->id)
+            ->where('transaction_type', 'sell')
+            ->orderBy('transaction_date', 'desc')
+            ->get();
+
+        $soldHistory = [];
+
+        foreach ($sellTransactions as $sellTransaction) {
+            // Calculate average buy price for this stock up to the sell date
+            $buyTransactions = StockTransaction::where('user_id', $user->id)
+                ->where('stock_id', $sellTransaction->stock_id)
+                ->where('transaction_type', 'buy')
+                ->where('transaction_date', '<=', $sellTransaction->transaction_date)
+                ->get();
+
+            $totalBuyInvestment = $buyTransactions->sum('net_amount');
+            $totalBuyQuantity = $buyTransactions->sum('quantity');
+            $avgBuyPrice = $totalBuyQuantity > 0 ? $totalBuyInvestment / $totalBuyQuantity : 0;
+
+            // Calculate investment for the sold quantity
+            $soldQuantityInvestment = $avgBuyPrice * $sellTransaction->quantity;
+
+            // Calculate realized P&L
+            $realizedPL = $sellTransaction->net_amount - $soldQuantityInvestment;
+            $roiPercent = $soldQuantityInvestment > 0 ? ($realizedPL / $soldQuantityInvestment) * 100 : 0;
+
+            // Calculate days held (approximate - using first buy date)
+            $firstBuyDate = $buyTransactions->min('transaction_date');
+            $daysHeld = $firstBuyDate ? \Carbon\Carbon::parse($firstBuyDate)->diffInDays($sellTransaction->transaction_date) : 0;
+
+            $soldHistory[] = [
+                'symbol' => $sellTransaction->stock->symbol,
+                'stock_name' => $sellTransaction->stock->name,
+                'sell_date' => $sellTransaction->transaction_date,
+                'quantity' => $sellTransaction->quantity,
+                'avg_buy_price' => round($avgBuyPrice, 2),
+                'sell_price' => $sellTransaction->price_per_stock,
+                'total_investment' => round($soldQuantityInvestment, 2),
+                'sale_proceeds' => $sellTransaction->net_amount,
+                'realized_pl' => round($realizedPL, 2),
+                'roi_percent' => round($roiPercent, 2),
+                'days_held' => $daysHeld,
+                'broker' => $sellTransaction->broker,
+                'notes' => $sellTransaction->notes,
+            ];
+        }
+
+        return response()->json($soldHistory);
+    }
+
     public function syncPrices()
     {
         try {
@@ -219,18 +275,41 @@ class EquityHoldingController extends Controller
     {
         $transactions = StockTransaction::where('user_id', $userId)
             ->where('stock_id', $stockId)
+            ->orderBy('transaction_date')
             ->get();
 
-        $totalQuantity = 0;
-        foreach ($transactions as $transaction) {
+        // Find the last point where quantity became zero (complete sell-off)
+        $runningQuantity = 0;
+        $lastZeroPoint = null;
+        $segmentStartIndex = 0;
+
+        foreach ($transactions as $index => $transaction) {
             if ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'bonus') {
-                $totalQuantity += $transaction->quantity;
+                $runningQuantity += $transaction->quantity;
             } elseif ($transaction->transaction_type === 'sell') {
-                $totalQuantity -= $transaction->quantity;
+                $runningQuantity -= $transaction->quantity;
+            }
+
+            // If quantity becomes zero, mark this as a potential segment boundary
+            if ($runningQuantity === 0) {
+                $lastZeroPoint = $index;
+                $segmentStartIndex = $index + 1;
             }
         }
 
-        return $totalQuantity;
+        // Calculate current holdings based on transactions after the last complete sell-off
+        $currentSegmentTransactions = $transactions->slice($segmentStartIndex);
+        $currentSegmentQuantity = 0;
+
+        foreach ($currentSegmentTransactions as $transaction) {
+            if ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'bonus') {
+                $currentSegmentQuantity += $transaction->quantity;
+            } elseif ($transaction->transaction_type === 'sell') {
+                $currentSegmentQuantity -= $transaction->quantity;
+            }
+        }
+
+        return $currentSegmentQuantity;
     }
 
     private function calculateHoldings($userId)
@@ -258,7 +337,52 @@ class EquityHoldingController extends Controller
                 ->orderBy('updated_at', 'desc')
                 ->first() ?: $stockTransactions->first()->stock;
 
-            // Calculate net quantity and investment
+            // Sort all transactions by date to find the current holdings segment
+            $allTransactionsSorted = $stockTransactions->sortBy('transaction_date');
+
+            // Find the last point where quantity became zero (complete sell-off)
+            $runningQuantity = 0;
+            $lastZeroPoint = null;
+            $segmentStartIndex = 0;
+
+            foreach ($allTransactionsSorted as $index => $transaction) {
+                if ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'bonus') {
+                    $runningQuantity += $transaction->quantity;
+                } elseif ($transaction->transaction_type === 'sell') {
+                    $runningQuantity -= $transaction->quantity;
+                }
+
+                // If quantity becomes zero, mark this as a potential segment boundary
+                if ($runningQuantity === 0) {
+                    $lastZeroPoint = $index;
+                    $segmentStartIndex = $index + 1;
+                }
+            }
+
+            // Calculate current holdings based on transactions after the last complete sell-off
+            $currentSegmentTransactions = $allTransactionsSorted->slice($segmentStartIndex);
+            $currentSegmentInvestment = 0;
+            $currentSegmentQuantity = 0;
+
+            // Process current segment for average price calculation
+            foreach ($currentSegmentTransactions as $transaction) {
+                if ($transaction->transaction_type === 'buy') {
+                    $currentSegmentQuantity += $transaction->quantity;
+                    $currentSegmentInvestment += $transaction->net_amount;
+                } elseif ($transaction->transaction_type === 'bonus') {
+                    $currentSegmentQuantity += $transaction->quantity;
+                    // Bonus shares don't add to investment cost
+                } elseif ($transaction->transaction_type === 'sell') {
+                    $currentSegmentQuantity -= $transaction->quantity;
+                    // For current segment sells, we need to remove proportional investment
+                    if ($currentSegmentQuantity + $transaction->quantity > 0) {
+                        $proportionSold = $transaction->quantity / ($currentSegmentQuantity + $transaction->quantity);
+                        $currentSegmentInvestment *= (1 - $proportionSold);
+                    }
+                }
+            }
+
+            // Calculate overall metrics including all historical transactions for reporting
             foreach ($buyTransactions as $transaction) {
                 $totalQuantity += $transaction->quantity;
                 $totalInvestment += $transaction->net_amount;
@@ -273,29 +397,37 @@ class EquityHoldingController extends Controller
                 $totalQuantity -= $transaction->quantity;
                 $totalSellProceeds += $transaction->net_amount;
 
-                // Calculate realized P&L (simplified FIFO method)
+                // Calculate realized P&L for historical reporting
                 $avgCostBasis = $totalInvestment > 0 ? $totalInvestment / ($totalQuantity + $transaction->quantity) : 0;
                 $costOfSoldShares = $avgCostBasis * $transaction->quantity;
                 $realizedPL += $transaction->net_amount - $costOfSoldShares;
             }
 
-            if ($totalQuantity > 0) {
-                $avgPrice = $totalInvestment > 0 ? $totalInvestment / $totalQuantity : 0;
+            // Only show holdings where user currently owns shares (use currentSegmentQuantity for accurate count)
+            $actualCurrentQuantity = $currentSegmentQuantity;
+            if ($actualCurrentQuantity > 0) {
+                // Use current segment for average price (fresh start after complete sell-off)
+                $avgPrice = $currentSegmentInvestment > 0 && $currentSegmentQuantity > 0
+                    ? $currentSegmentInvestment / $currentSegmentQuantity
+                    : ($totalInvestment > 0 ? $totalInvestment / $actualCurrentQuantity : 0);
 
                 // If current price is available and > 0, use it. Otherwise, use avg price
                 $currentPrice = ($representativeStock->current_price && floatval($representativeStock->current_price) > 0)
                     ? floatval($representativeStock->current_price)
                     : $avgPrice;
-                $currentValue = $totalQuantity * $currentPrice;
-                $unrealizedGainLoss = $currentValue - $totalInvestment;
-                $unrealizedGainLossPercent = $totalInvestment > 0 ? ($unrealizedGainLoss / $totalInvestment) * 100 : 0;
+                $currentValue = $actualCurrentQuantity * $currentPrice;
+
+                // Calculate unrealized P&L based on current segment investment (not total historical)
+                $activeInvestment = $currentSegmentInvestment > 0 ? $currentSegmentInvestment : $totalInvestment;
+                $unrealizedGainLoss = $currentValue - $activeInvestment;
+                $unrealizedGainLossPercent = $activeInvestment > 0 ? ($unrealizedGainLoss / $activeInvestment) * 100 : 0;
 
                 // Collect all exchanges for this symbol
                 $exchanges = $stockTransactions->pluck('stock.exchange')->unique()->implode('/');
 
-                // Enhanced transactions with additional metrics (include all transaction types)
-                $allTransactions = $stockTransactions->sortByDesc('transaction_date');
-                $enhancedTransactions = $allTransactions->map(function ($transaction) use ($currentPrice) {
+                // Enhanced transactions with additional metrics (only show current segment transactions)
+                $currentSegmentTransactionsForDisplay = $currentSegmentTransactions->sortByDesc('transaction_date');
+                $enhancedTransactions = $currentSegmentTransactionsForDisplay->map(function ($transaction) use ($currentPrice) {
                     $daysHeld = now()->diffInDays($transaction->transaction_date);
 
                     if ($transaction->transaction_type === 'sell') {
@@ -324,22 +456,23 @@ class EquityHoldingController extends Controller
                     'name' => $representativeStock->name,
                     'exchange' => $exchanges,
                     'sector' => $representativeStock->sector,
-                    'quantity' => $totalQuantity,
+                    'quantity' => $actualCurrentQuantity,
                     'avg_price' => round($avgPrice, 2),
                     'current_price' => $currentPrice,
-                    'total_investment' => round($totalInvestment, 2),
+                    'total_investment' => round($activeInvestment, 2), // Show active investment, not historical
                     'current_value' => round($currentValue, 0),
                     'unrealized_gain_loss' => round($unrealizedGainLoss, 0),
                     'unrealized_gain_loss_percent' => round($unrealizedGainLossPercent, 2),
                     'realized_gain_loss' => round($realizedPL, 0),
                     'total_sell_proceeds' => round($totalSellProceeds, 2),
+                    'historical_investment' => round($totalInvestment, 2), // Keep historical for reporting
                     'day_change' => $representativeStock->day_change,
                     'day_change_percent' => $representativeStock->day_change_percent,
                     'week_52_high' => $representativeStock->week_52_high,
                     'week_52_low' => $representativeStock->week_52_low,
-                    'transaction_count' => $stockTransactions->count(),
-                    'buy_transaction_count' => $buyTransactions->count(),
-                    'sell_transaction_count' => $sellTransactions->count(),
+                    'transaction_count' => $currentSegmentTransactions->count(),
+                    'buy_transaction_count' => $currentSegmentTransactions->where('transaction_type', 'buy')->count(),
+                    'sell_transaction_count' => $currentSegmentTransactions->where('transaction_type', 'sell')->count(),
                     'transactions' => $enhancedTransactions->values(),
                 ];
 
