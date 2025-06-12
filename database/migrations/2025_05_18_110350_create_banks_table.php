@@ -16,7 +16,7 @@ return new class extends Migration
             $table->string('name')->unique();
             $table->timestamps();
         });
-    
+
         // Optional: Seed initial banks
         DB::table('banks')->insert([
             ['name' => 'SBI'],
