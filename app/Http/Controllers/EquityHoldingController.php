@@ -32,10 +32,14 @@ class EquityHoldingController extends Controller
         // Get dividend summary for the user
         $dividendSummary = $this->dividendService->getUserDividendSummary($user->id);
 
+        // Get STCG/LTCG summary
+        $capitalGainsSummary = $this->calculateCapitalGainsSummary($user->id);
+
         return Inertia::render('EquityHolding/Index', [
             'holdings' => $holdings,
             'portfolioMetrics' => $portfolioMetrics,
             'dividendSummary' => $dividendSummary,
+            'capitalGainsSummary' => $capitalGainsSummary,
         ]);
     }
 
@@ -166,56 +170,231 @@ class EquityHoldingController extends Controller
     {
         $user = Auth::user();
 
-        // Get all sell transactions with stock details
-        $sellTransactions = StockTransaction::with('stock')
+        // Get all transactions to calculate final holdings
+        $allTransactions = StockTransaction::with('stock')
             ->where('user_id', $user->id)
-            ->where('transaction_type', 'sell')
-            ->orderBy('transaction_date', 'desc')
             ->get();
 
+        // Calculate final holdings for each stock using FIFO logic
+        $stockHoldings = [];
+        $stockTransactionsByStock = $allTransactions->groupBy('stock_id');
+
+        foreach ($stockTransactionsByStock as $stockId => $transactions) {
+            $buyQueue = collect();
+
+            // Sort transactions chronologically
+            $sortedTransactions = $transactions->sortBy(['transaction_date', 'id']);
+
+            // Process transactions using FIFO
+            foreach ($sortedTransactions as $transaction) {
+                if ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'bonus') {
+                    $buyQueue->push([
+                        'quantity' => $transaction->quantity,
+                        'remaining' => $transaction->quantity
+                    ]);
+                } elseif ($transaction->transaction_type === 'sell') {
+                    $remainingToSell = $transaction->quantity;
+
+                    while ($remainingToSell > 0 && $buyQueue->isNotEmpty()) {
+                        $buyEntry = $buyQueue->shift();
+
+                        if ($buyEntry['remaining'] <= $remainingToSell) {
+                            $remainingToSell -= $buyEntry['remaining'];
+                        } else {
+                            $buyEntry['remaining'] -= $remainingToSell;
+                            $buyQueue->prepend($buyEntry);
+                            $remainingToSell = 0;
+                        }
+                    }
+                }
+            }
+
+            // Calculate final holdings
+            $stockHoldings[$stockId] = $buyQueue->sum('remaining');
+        }
+
+        // Find stocks that have any sell transactions (regardless of current holdings)
+        $stocksWithSells = $allTransactions
+            ->where('transaction_type', 'sell')
+            ->pluck('stock_id')
+            ->unique()
+            ->toArray();
+
+        if (empty($stocksWithSells)) {
+            return response()->json([]);
+        }
+
+        // Get transactions for stocks that have sell transactions
+        $soldStockTransactions = StockTransaction::with('stock')
+            ->where('user_id', $user->id)
+            ->whereIn('stock_id', $stocksWithSells)
+            ->orderBy('transaction_date', 'desc') // Latest on top
+            ->get();
+
+        // Group transactions by stock
+        $groupedByStock = $soldStockTransactions->groupBy('stock_id');
         $soldHistory = [];
 
+        foreach ($groupedByStock as $stockId => $stockTransactions) {
+            $stockInfo = $stockTransactions->first()->stock;
+            $processedTransactions = [];
+            $totalInvestment = 0;
+            $totalProceeds = 0;
+            $totalRealizedPL = 0;
+
+            foreach ($stockTransactions as $transaction) {
+                $transactionType = ucfirst($transaction->transaction_type);
+
+                // Calculate total amount and charges consistently
+                $totalAmount = $transaction->quantity * $transaction->price_per_stock;
+                $charges = abs($totalAmount - $transaction->net_amount); // Always positive
+
+                // Calculate realized gain/loss for sell transactions
+                $realizedGainLoss = null;
+                if ($transaction->transaction_type === 'sell') {
+                    $realizedGainLoss = $this->calculateRealizedGainLoss($user->id, $transaction);
+                    $totalProceeds += $transaction->net_amount;
+                    $totalRealizedPL += $realizedGainLoss;
+                } elseif ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'bonus') {
+                    $totalInvestment += $transaction->net_amount;
+                }
+
+                $processedTransactions[] = [
+                    'date' => $transaction->transaction_date,
+                    'type' => $transactionType,
+                    'quantity' => $transaction->quantity,
+                    'unit_price' => $transaction->price_per_stock,
+                    'total_amount' => round($totalAmount, 2),
+                    'charges' => round($charges, 2),
+                    'net_amount' => round($transaction->net_amount, 2),
+                    'realized_gain_loss' => $realizedGainLoss ? round($realizedGainLoss, 2) : null,
+                    'broker' => $transaction->broker,
+                    'notes' => $transaction->notes,
+                ];
+            }
+
+            $soldHistory[] = [
+                'stock_id' => $stockId,
+                'stock_symbol' => $stockInfo->symbol,
+                'stock_name' => $stockInfo->name,
+                'sector' => $stockInfo->sector ?? 'Unknown',
+                'transactions' => $processedTransactions,
+                'total_investment' => round($totalInvestment, 2),
+                'total_proceeds' => round($totalProceeds, 2),
+                'total_realized_pl' => round($totalRealizedPL, 2),
+                'total_transactions' => count($processedTransactions),
+            ];
+        }
+
+        return response()->json($soldHistory);
+    }
+
+    private function calculateRealizedGainLoss($userId, $sellTransaction)
+    {
+        // Get all buy transactions for this stock up to the sell date
+        $buyTransactions = StockTransaction::where('user_id', $userId)
+            ->where('stock_id', $sellTransaction->stock_id)
+            ->where('transaction_type', 'buy')
+            ->where('transaction_date', '<=', $sellTransaction->transaction_date)
+            ->orderBy('transaction_date', 'asc')
+            ->orderBy('id', 'asc')
+            ->get();
+
+        if ($buyTransactions->isEmpty()) {
+            return 0;
+        }
+
+        // Calculate average buy price
+        $totalInvestment = $buyTransactions->sum('net_amount');
+        $totalQuantity = $buyTransactions->sum('quantity');
+        $avgBuyPrice = $totalQuantity > 0 ? $totalInvestment / $totalQuantity : 0;
+
+        // Calculate realized P&L
+        $soldInvestment = $avgBuyPrice * $sellTransaction->quantity;
+        $realizedPL = $sellTransaction->net_amount - $soldInvestment;
+
+        return $realizedPL;
+    }
+
+    private function calculateCapitalGainsSummary($userId)
+    {
+        // Get all sell transactions to calculate STCG/LTCG
+        $sellTransactions = StockTransaction::with('stock')
+            ->where('user_id', $userId)
+            ->where('transaction_type', 'sell')
+            ->get();
+
+        $stcgTotal = 0;
+        $ltcgTotal = 0;
+
         foreach ($sellTransactions as $sellTransaction) {
-            // Calculate average buy price for this stock up to the sell date
-            $buyTransactions = StockTransaction::where('user_id', $user->id)
+            // Calculate days held for each transaction
+            $buyTransactions = StockTransaction::where('user_id', $userId)
                 ->where('stock_id', $sellTransaction->stock_id)
                 ->where('transaction_type', 'buy')
                 ->where('transaction_date', '<=', $sellTransaction->transaction_date)
                 ->get();
 
+            $firstBuyDate = $buyTransactions->min('transaction_date');
+            $daysHeld = 0;
+
+            if ($firstBuyDate) {
+                $buyDate = \Carbon\Carbon::parse($firstBuyDate);
+                $sellDate = \Carbon\Carbon::parse($sellTransaction->transaction_date);
+
+                if ($buyDate->isSameDay($sellDate)) {
+                    $daysHeld = 0;
+                } else {
+                    $daysHeld = $buyDate->diffInDays($sellDate);
+                }
+            }
+
+            // Calculate realized P&L
             $totalBuyInvestment = $buyTransactions->sum('net_amount');
             $totalBuyQuantity = $buyTransactions->sum('quantity');
             $avgBuyPrice = $totalBuyQuantity > 0 ? $totalBuyInvestment / $totalBuyQuantity : 0;
-
-            // Calculate investment for the sold quantity
             $soldQuantityInvestment = $avgBuyPrice * $sellTransaction->quantity;
-
-            // Calculate realized P&L
             $realizedPL = $sellTransaction->net_amount - $soldQuantityInvestment;
-            $roiPercent = $soldQuantityInvestment > 0 ? ($realizedPL / $soldQuantityInvestment) * 100 : 0;
 
-            // Calculate days held (approximate - using first buy date)
-            $firstBuyDate = $buyTransactions->min('transaction_date');
-            $daysHeld = $firstBuyDate ? \Carbon\Carbon::parse($firstBuyDate)->diffInDays($sellTransaction->transaction_date) : 0;
-
-            $soldHistory[] = [
-                'symbol' => $sellTransaction->stock->symbol,
-                'stock_name' => $sellTransaction->stock->name,
-                'sell_date' => $sellTransaction->transaction_date,
-                'quantity' => $sellTransaction->quantity,
-                'avg_buy_price' => round($avgBuyPrice, 2),
-                'sell_price' => $sellTransaction->price_per_stock,
-                'total_investment' => round($soldQuantityInvestment, 2),
-                'sale_proceeds' => $sellTransaction->net_amount,
-                'realized_pl' => round($realizedPL, 2),
-                'roi_percent' => round($roiPercent, 2),
-                'days_held' => $daysHeld,
-                'broker' => $sellTransaction->broker,
-                'notes' => $sellTransaction->notes,
-            ];
+            // Add to STCG or LTCG based on holding period
+            if ($daysHeld <= 365) {
+                $stcgTotal += $realizedPL;
+            } else {
+                $ltcgTotal += $realizedPL;
+            }
         }
 
-        return response()->json($soldHistory);
+        return [
+            'stcg_total' => round($stcgTotal, 2),
+            'ltcg_total' => round($ltcgTotal, 2),
+            'total_capital_gains' => round($stcgTotal + $ltcgTotal, 2),
+        ];
+    }
+
+    private function getDividendsForSoldStock($userId, $stockId, $buyDate, $sellDate)
+    {
+        if (!$buyDate || !$sellDate) {
+            return 0;
+        }
+
+        try {
+            // Get dividend records for this user and stock during the holding period
+            $dividendRecords = \App\Models\UserDividendRecord::with('dividendPayment')
+                ->where('user_id', $userId)
+                ->where('stock_id', $stockId)
+                ->where('status', 'received')
+                ->whereHas('dividendPayment', function ($query) use ($buyDate, $sellDate) {
+                    $query->where('ex_dividend_date', '>=', $buyDate)
+                        ->where('ex_dividend_date', '<=', $sellDate);
+                })
+                ->get();
+
+            return $dividendRecords->sum('total_dividend_amount');
+        } catch (\Exception $e) {
+            // Return 0 if there's any error with dividend calculation
+            \Illuminate\Support\Facades\Log::warning("Error calculating dividends for sold stock: " . $e->getMessage());
+            return 0;
+        }
     }
 
     public function syncPrices(Request $request)
@@ -373,50 +552,52 @@ class EquityHoldingController extends Controller
                 ->orderBy('updated_at', 'desc')
                 ->first() ?: $stockTransactions->first()->stock;
 
-            // Sort all transactions by date to find the current holdings segment
-            $allTransactionsSorted = $stockTransactions->sortBy('transaction_date');
+            // Sort all transactions by date to use FIFO for current holdings calculation
+            $allTransactionsSorted = $stockTransactions->sortBy(['transaction_date', 'id']);
 
-            // Find the last point where quantity became zero (complete sell-off)
-            $runningQuantity = 0;
-            $lastZeroPoint = null;
-            $segmentStartIndex = 0;
+            // FIFO matching to find which buy/bonus transactions contribute to current holdings
+            $buyQueue = collect();
+            $currentHoldingTransactions = collect();
 
-            foreach ($allTransactionsSorted as $index => $transaction) {
+            // Process all transactions chronologically
+            foreach ($allTransactionsSorted as $transaction) {
                 if ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'bonus') {
-                    $runningQuantity += $transaction->quantity;
+                    // Add to buy queue
+                    $buyQueue->push([
+                        'transaction' => $transaction,
+                        'quantity' => $transaction->quantity,
+                        'remaining' => $transaction->quantity
+                    ]);
                 } elseif ($transaction->transaction_type === 'sell') {
-                    $runningQuantity -= $transaction->quantity;
-                }
+                    $remainingToSell = $transaction->quantity;
 
-                // If quantity becomes zero, mark this as a potential segment boundary
-                if ($runningQuantity === 0) {
-                    $lastZeroPoint = $index;
-                    $segmentStartIndex = $index + 1;
-                }
-            }
+                    // Match against buy queue using FIFO
+                    while ($remainingToSell > 0 && $buyQueue->isNotEmpty()) {
+                        $buyEntry = $buyQueue->shift(); // Remove first element
 
-            // Calculate current holdings based on transactions after the last complete sell-off
-            $currentSegmentTransactions = $allTransactionsSorted->slice($segmentStartIndex);
-            $currentSegmentInvestment = 0;
-            $currentSegmentQuantity = 0;
-
-            // Process current segment for average price calculation
-            foreach ($currentSegmentTransactions as $transaction) {
-                if ($transaction->transaction_type === 'buy') {
-                    $currentSegmentQuantity += $transaction->quantity;
-                    $currentSegmentInvestment += $transaction->net_amount;
-                } elseif ($transaction->transaction_type === 'bonus') {
-                    $currentSegmentQuantity += $transaction->quantity;
-                    // Bonus shares don't add to investment cost
-                } elseif ($transaction->transaction_type === 'sell') {
-                    $currentSegmentQuantity -= $transaction->quantity;
-                    // For current segment sells, we need to remove proportional investment
-                    if ($currentSegmentQuantity + $transaction->quantity > 0) {
-                        $proportionSold = $transaction->quantity / ($currentSegmentQuantity + $transaction->quantity);
-                        $currentSegmentInvestment *= (1 - $proportionSold);
+                        if ($buyEntry['remaining'] <= $remainingToSell) {
+                            // This buy transaction is completely consumed
+                            $remainingToSell -= $buyEntry['remaining'];
+                            // Don't put it back - it's fully consumed
+                        } else {
+                            // Partial consumption of this buy transaction
+                            $buyEntry['remaining'] -= $remainingToSell;
+                            $buyQueue->prepend($buyEntry); // Put back the partially consumed entry
+                            $remainingToSell = 0;
+                        }
                     }
                 }
             }
+
+            // Extract transactions that still contribute to current holdings
+            foreach ($buyQueue as $buyEntry) {
+                if ($buyEntry['remaining'] > 0) {
+                    $currentHoldingTransactions->push($buyEntry);
+                }
+            }
+
+            // Calculate total current holdings quantity
+            $currentHoldingsQuantity = $buyQueue->sum('remaining');
 
             // Calculate overall metrics including all historical transactions for reporting
             foreach ($buyTransactions as $transaction) {
@@ -439,24 +620,25 @@ class EquityHoldingController extends Controller
                 $realizedPL += $transaction->net_amount - $costOfSoldShares;
             }
 
-            // Only show holdings where user currently owns shares (use currentSegmentQuantity for accurate count)
-            $actualCurrentQuantity = $currentSegmentQuantity;
-            if ($actualCurrentQuantity > 0) {
-                // Use current segment for average price (fresh start after complete sell-off)
-                $avgPrice = $currentSegmentInvestment > 0 && $currentSegmentQuantity > 0
-                    ? $currentSegmentInvestment / $currentSegmentQuantity
-                    : ($totalInvestment > 0 ? $totalInvestment / $actualCurrentQuantity : 0);
+            // Only show holdings where user currently owns shares
+            if ($currentHoldingsQuantity > 0) {
+                // Calculate investment for current holdings only
+                $currentHoldingsInvestment = $currentHoldingTransactions->sum('net_amount');
+
+                // Calculate average price from current holdings
+                $avgPrice = $currentHoldingsInvestment > 0 && $currentHoldingsQuantity > 0
+                    ? $currentHoldingsInvestment / $currentHoldingsQuantity
+                    : ($totalInvestment > 0 ? $totalInvestment / $currentHoldingsQuantity : 0);
 
                 // If current price is available and > 0, use it. Otherwise, use avg price
                 $currentPrice = ($representativeStock->current_price && floatval($representativeStock->current_price) > 0)
                     ? floatval($representativeStock->current_price)
                     : $avgPrice;
-                $currentValue = $actualCurrentQuantity * $currentPrice;
+                $currentValue = $currentHoldingsQuantity * $currentPrice;
 
-                // Calculate unrealized P&L based on current segment investment (not total historical)
-                $activeInvestment = $currentSegmentInvestment > 0 ? $currentSegmentInvestment : $totalInvestment;
-                $unrealizedGainLoss = $currentValue - $activeInvestment;
-                $unrealizedGainLossPercent = $activeInvestment > 0 ? ($unrealizedGainLoss / $activeInvestment) * 100 : 0;
+                // Calculate unrealized P&L based on current holdings investment
+                $unrealizedGainLoss = $currentValue - $currentHoldingsInvestment;
+                $unrealizedGainLossPercent = $currentHoldingsInvestment > 0 ? ($unrealizedGainLoss / $currentHoldingsInvestment) * 100 : 0;
 
                 // Collect all exchanges for this symbol
                 $exchanges = $stockTransactions->pluck('stock.exchange')->unique()->implode('/');
@@ -465,30 +647,35 @@ class EquityHoldingController extends Controller
                 $dividendEligibility = $this->dividendService->calculateDividendEligibility($userId, $representativeStock->id);
                 $roiWithDividends = $this->dividendService->getROIWithDividends($userId, $representativeStock->id);
 
-                // Enhanced transactions with additional metrics (only show current segment transactions)
-                $currentSegmentTransactionsForDisplay = $currentSegmentTransactions->sortByDesc('transaction_date');
-                $enhancedTransactions = $currentSegmentTransactionsForDisplay->map(function ($transaction) use ($currentPrice) {
-                    $daysHeld = now()->diffInDays($transaction->transaction_date);
+                // Enhanced transactions - only show transactions that contribute to current holdings
+                $enhancedTransactions = $currentHoldingTransactions
+                    ->sortByDesc(function ($buyEntry) {
+                        return $buyEntry['transaction']->transaction_date;
+                    })
+                    ->map(function ($buyEntry) use ($currentPrice) {
+                        $transaction = $buyEntry['transaction'];
+                        $remainingQuantity = $buyEntry['remaining'];
 
-                    if ($transaction->transaction_type === 'sell') {
-                        // For sell transactions, show realized P&L
-                        $transactionPL = $transaction->net_amount - ($transaction->quantity * $transaction->price_per_stock);
-                        $transactionCurrentValue = 0; // Already sold
-                    } else {
-                        // For buy/bonus transactions, show unrealized P&L
-                        $transactionCurrentValue = $transaction->quantity * $currentPrice;
-                        $transactionPL = $transactionCurrentValue - $transaction->net_amount;
-                    }
+                        $daysHeld = now()->diffInDays($transaction->transaction_date);
 
-                    return array_merge($transaction->toArray(), [
-                        'days_held' => $daysHeld,
-                        'current_value' => round($transactionCurrentValue, 0),
-                        'pl_amount' => round($transactionPL, 0),
-                        'pl_percent' => $transaction->net_amount > 0 ? round(($transactionPL / $transaction->net_amount) * 100, 2) : 0,
-                        'is_bonus' => $transaction->price_per_stock == 0,
-                        'is_sell' => $transaction->transaction_type === 'sell',
-                    ]);
-                });
+                        // Calculate proportional investment for remaining shares
+                        $proportionalInvestment = ($transaction->net_amount / $transaction->quantity) * $remainingQuantity;
+
+                        // For buy/bonus transactions, show unrealized P&L based on remaining quantity
+                        $transactionCurrentValue = $remainingQuantity * $currentPrice;
+                        $transactionPL = $transactionCurrentValue - $proportionalInvestment;
+
+                        return array_merge($transaction->toArray(), [
+                            'quantity' => $remainingQuantity, // Override with remaining quantity
+                            'net_amount' => round($proportionalInvestment, 2), // Override with proportional investment
+                            'days_held' => $daysHeld,
+                            'current_value' => round($transactionCurrentValue, 0),
+                            'pl_amount' => round($transactionPL, 0),
+                            'pl_percent' => $proportionalInvestment > 0 ? round(($transactionPL / $proportionalInvestment) * 100, 2) : 0,
+                            'is_bonus' => $transaction->price_per_stock == 0,
+                            'is_sell' => false, // Only showing buy/bonus transactions
+                        ]);
+                    });
 
                 $tempHoldings[] = [
                     'stock_id' => $representativeStock->id,
@@ -496,10 +683,10 @@ class EquityHoldingController extends Controller
                     'name' => $representativeStock->name,
                     'exchange' => $exchanges,
                     'sector' => $representativeStock->sector,
-                    'quantity' => $actualCurrentQuantity,
+                    'quantity' => $currentHoldingsQuantity,
                     'avg_price' => round($avgPrice, 2),
                     'current_price' => $currentPrice,
-                    'total_investment' => round($activeInvestment, 2), // Show active investment, not historical
+                    'total_investment' => round($currentHoldingsInvestment, 2), // Show only current holdings investment
                     'current_value' => round($currentValue, 0),
                     'unrealized_gain_loss' => round($unrealizedGainLoss, 0),
                     'unrealized_gain_loss_percent' => round($unrealizedGainLossPercent, 2),
@@ -510,9 +697,11 @@ class EquityHoldingController extends Controller
                     'day_change_percent' => $representativeStock->day_change_percent,
                     'week_52_high' => $representativeStock->week_52_high,
                     'week_52_low' => $representativeStock->week_52_low,
-                    'transaction_count' => $currentSegmentTransactions->count(),
-                    'buy_transaction_count' => $currentSegmentTransactions->where('transaction_type', 'buy')->count(),
-                    'sell_transaction_count' => $currentSegmentTransactions->where('transaction_type', 'sell')->count(),
+                    'transaction_count' => $currentHoldingTransactions->count(),
+                    'buy_transaction_count' => $currentHoldingTransactions->filter(function ($buyEntry) {
+                        return $buyEntry['transaction']->transaction_type === 'buy';
+                    })->count(),
+                    'sell_transaction_count' => 0, // No sell transactions shown for current holdings
                     'transactions' => $enhancedTransactions->values(),
                     // Dividend information
                     'dividend_data' => [

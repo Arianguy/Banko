@@ -1040,11 +1040,23 @@ const HoldingsCards = ({ holdings, openSellModal }: { holdings: any[]; openSellM
 };
 
 const SoldHistoryTable = ({ soldHistory }: { soldHistory: any[] }) => {
+    const [expandedStocks, setExpandedStocks] = useState<Set<number>>(new Set());
+
+    const toggleStock = (stockId: number) => {
+        const newExpanded = new Set(expandedStocks);
+        if (newExpanded.has(stockId)) {
+            newExpanded.delete(stockId);
+        } else {
+            newExpanded.add(stockId);
+        }
+        setExpandedStocks(newExpanded);
+    };
+
     if (soldHistory.length === 0) {
         return (
             <Card className="mb-6">
                 <CardContent className="p-6 text-center">
-                    <p className="text-gray-500">No sold transactions found.</p>
+                    <p className="text-gray-500">No completely sold stocks found.</p>
                 </CardContent>
             </Card>
         );
@@ -1053,8 +1065,8 @@ const SoldHistoryTable = ({ soldHistory }: { soldHistory: any[] }) => {
     return (
         <Card className="mb-6">
             <CardHeader>
-                <CardTitle className="text-lg font-semibold">Sold Transactions History</CardTitle>
-                <p className="text-sm text-gray-600">Complete history of sold positions with ROI details</p>
+                <CardTitle className="text-lg font-semibold">Sold Stocks History</CardTitle>
+                <p className="text-sm text-gray-600">Complete transaction history for stocks that have been fully sold</p>
             </CardHeader>
             <CardContent>
                 <div className="overflow-x-auto">
@@ -1062,50 +1074,107 @@ const SoldHistoryTable = ({ soldHistory }: { soldHistory: any[] }) => {
                         <thead className="bg-gray-50">
                             <tr>
                                 <th className="px-4 py-3 text-left font-medium text-gray-900">Stock</th>
-                                <th className="px-4 py-3 text-left font-medium text-gray-900">Sell Date</th>
+                                <th className="px-4 py-3 text-left font-medium text-gray-900">Date</th>
+                                <th className="px-4 py-3 text-left font-medium text-gray-900">Type</th>
                                 <th className="px-4 py-3 text-right font-medium text-gray-900">Quantity</th>
-                                <th className="px-4 py-3 text-right font-medium text-gray-900">Avg Buy Price</th>
-                                <th className="px-4 py-3 text-right font-medium text-gray-900">Sell Price</th>
-                                <th className="px-4 py-3 text-right font-medium text-gray-900">Investment</th>
-                                <th className="px-4 py-3 text-right font-medium text-gray-900">Sale Proceeds</th>
+                                <th className="px-4 py-3 text-right font-medium text-gray-900">Unit Price</th>
+                                <th className="px-4 py-3 text-right font-medium text-gray-900">Amount</th>
+                                <th className="px-4 py-3 text-right font-medium text-gray-900">Charges</th>
+                                <th className="px-4 py-3 text-right font-medium text-gray-900">Net Amount</th>
                                 <th className="px-4 py-3 text-right font-medium text-gray-900">Realized P&L</th>
-                                <th className="px-4 py-3 text-right font-medium text-gray-900">ROI %</th>
-                                <th className="px-4 py-3 text-right font-medium text-gray-900">Days Held</th>
+                                <th className="px-4 py-3 text-left font-medium text-gray-900">Broker</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200 bg-white">
-                            {soldHistory.map((transaction, index) => (
-                                <tr key={index} className="hover:bg-gray-50">
-                                    <td className="px-4 py-3">
-                                        <div>
-                                            <div className="font-medium text-gray-900">{transaction.symbol}</div>
-                                            <div className="text-xs text-gray-500">{transaction.stock_name}</div>
-                                        </div>
-                                    </td>
-                                    <td className="px-4 py-3 text-gray-900">{new Date(transaction.sell_date).toLocaleDateString('en-IN')}</td>
-                                    <td className="px-4 py-3 text-right text-gray-900">{transaction.quantity}</td>
-                                    <td className="px-4 py-3 text-right text-gray-900">{formatINR(transaction.avg_buy_price)}</td>
-                                    <td className="px-4 py-3 text-right text-gray-900">{formatINR(transaction.sell_price)}</td>
-                                    <td className="px-4 py-3 text-right text-gray-900">{formatINR(transaction.total_investment)}</td>
-                                    <td className="px-4 py-3 text-right text-gray-900">{formatINR(transaction.sale_proceeds)}</td>
-                                    <td
-                                        className={`px-4 py-3 text-right font-medium ${
-                                            transaction.realized_pl >= 0 ? 'text-green-600' : 'text-red-600'
-                                        }`}
-                                    >
-                                        {transaction.realized_pl >= 0 ? '+' : ''}
-                                        {formatINR(transaction.realized_pl)}
-                                    </td>
-                                    <td
-                                        className={`px-4 py-3 text-right font-medium ${
-                                            transaction.roi_percent >= 0 ? 'text-green-600' : 'text-red-600'
-                                        }`}
-                                    >
-                                        {transaction.roi_percent >= 0 ? '+' : ''}
-                                        {transaction.roi_percent.toFixed(2)}%
-                                    </td>
-                                    <td className="px-4 py-3 text-right text-gray-900">{transaction.days_held}</td>
-                                </tr>
+                            {soldHistory.map((stock) => (
+                                <React.Fragment key={stock.stock_id}>
+                                    {/* Stock Header Row */}
+                                    <tr className="cursor-pointer bg-blue-50 hover:bg-blue-100" onClick={() => toggleStock(stock.stock_id)}>
+                                        <td className="px-4 py-3">
+                                            <div className="flex items-center">
+                                                {expandedStocks.has(stock.stock_id) ? (
+                                                    <ChevronDown className="mr-2 h-4 w-4 text-blue-600" />
+                                                ) : (
+                                                    <ChevronRight className="mr-2 h-4 w-4 text-blue-600" />
+                                                )}
+                                                <div>
+                                                    <div className="font-bold text-blue-900">{stock.stock_symbol}</div>
+                                                    <div className="text-xs text-blue-700">{stock.stock_name}</div>
+                                                    <div className="text-xs text-blue-600">{stock.sector}</div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-3 font-medium text-blue-900">
+                                            {stock.total_transactions} transaction{stock.total_transactions > 1 ? 's' : ''}
+                                        </td>
+                                        <td className="px-4 py-3 text-blue-900">Summary</td>
+                                        <td className="px-4 py-3 text-right font-medium text-blue-900">
+                                            {stock.transactions.reduce((sum: number, t: any) => sum + (t.type === 'Buy' ? t.quantity : 0), 0)} bought
+                                        </td>
+                                        <td className="px-4 py-3 text-right text-blue-900">-</td>
+                                        <td className="px-4 py-3 text-right text-blue-900">-</td>
+                                        <td className="px-4 py-3 text-right text-blue-900">-</td>
+                                        <td className="px-4 py-3 text-right font-medium text-blue-900">
+                                            Investment: {formatINR(stock.total_investment)}
+                                            <br />
+                                            Proceeds: {formatINR(stock.total_proceeds)}
+                                        </td>
+                                        <td
+                                            className={`px-4 py-3 text-right font-bold ${
+                                                stock.total_realized_pl >= 0 ? 'text-green-600' : 'text-red-600'
+                                            }`}
+                                        >
+                                            {stock.total_realized_pl >= 0 ? '+' : ''}
+                                            {formatINR(stock.total_realized_pl)}
+                                        </td>
+                                        <td className="px-4 py-3 text-blue-900">Multiple</td>
+                                    </tr>
+
+                                    {/* Individual Transaction Rows */}
+                                    {expandedStocks.has(stock.stock_id) &&
+                                        stock.transactions.map((transaction: any, index: number) => (
+                                            <tr key={`${stock.stock_id}-${index}`} className="bg-gray-25 hover:bg-gray-50">
+                                                <td className="px-4 py-3 pl-12">
+                                                    <div className="text-sm text-gray-600">Transaction {index + 1}</div>
+                                                </td>
+                                                <td className="px-4 py-3 text-gray-900">{new Date(transaction.date).toLocaleDateString('en-IN')}</td>
+                                                <td className="px-4 py-3">
+                                                    <span
+                                                        className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
+                                                            transaction.type === 'Buy'
+                                                                ? 'bg-green-100 text-green-800'
+                                                                : transaction.type === 'Sell'
+                                                                  ? 'bg-red-100 text-red-800'
+                                                                  : transaction.type === 'Dividend'
+                                                                    ? 'bg-blue-100 text-blue-800'
+                                                                    : 'bg-gray-100 text-gray-800'
+                                                        }`}
+                                                    >
+                                                        {transaction.type}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-right text-gray-900">{transaction.quantity}</td>
+                                                <td className="px-4 py-3 text-right text-gray-900">{formatINR(transaction.unit_price)}</td>
+                                                <td className="px-4 py-3 text-right text-gray-900">{formatINR(transaction.total_amount)}</td>
+                                                <td className="px-4 py-3 text-right text-gray-900">{formatINR(transaction.charges)}</td>
+                                                <td className="px-4 py-3 text-right text-gray-900">{formatINR(transaction.net_amount)}</td>
+                                                <td
+                                                    className={`px-4 py-3 text-right font-medium ${
+                                                        transaction.realized_gain_loss === null
+                                                            ? 'text-gray-400'
+                                                            : transaction.realized_gain_loss >= 0
+                                                              ? 'text-green-600'
+                                                              : 'text-red-600'
+                                                    }`}
+                                                >
+                                                    {transaction.realized_gain_loss === null
+                                                        ? '-'
+                                                        : `${transaction.realized_gain_loss >= 0 ? '+' : ''}${formatINR(transaction.realized_gain_loss)}`}
+                                                </td>
+                                                <td className="px-4 py-3 text-gray-900">{transaction.broker || '-'}</td>
+                                            </tr>
+                                        ))}
+                                </React.Fragment>
                             ))}
                         </tbody>
                     </table>
@@ -1115,26 +1184,32 @@ const SoldHistoryTable = ({ soldHistory }: { soldHistory: any[] }) => {
                 <div className="mt-4 border-t pt-4">
                     <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
                         <div className="text-center">
-                            <div className="text-sm text-gray-500">Total Transactions</div>
+                            <div className="text-sm text-gray-500">Stocks Sold</div>
                             <div className="text-lg font-semibold">{soldHistory.length}</div>
                         </div>
                         <div className="text-center">
                             <div className="text-sm text-gray-500">Total Investment</div>
-                            <div className="text-lg font-semibold">{formatINR(soldHistory.reduce((sum, t) => sum + t.total_investment, 0))}</div>
+                            <div className="text-lg font-semibold">
+                                {formatINR(soldHistory.reduce((sum, stock) => sum + stock.total_investment, 0))}
+                            </div>
                         </div>
                         <div className="text-center">
                             <div className="text-sm text-gray-500">Total Proceeds</div>
-                            <div className="text-lg font-semibold">{formatINR(soldHistory.reduce((sum, t) => sum + t.sale_proceeds, 0))}</div>
+                            <div className="text-lg font-semibold">
+                                {formatINR(soldHistory.reduce((sum, stock) => sum + stock.total_proceeds, 0))}
+                            </div>
                         </div>
                         <div className="text-center">
                             <div className="text-sm text-gray-500">Total Realized P&L</div>
                             <div
                                 className={`text-lg font-semibold ${
-                                    soldHistory.reduce((sum, t) => sum + t.realized_pl, 0) >= 0 ? 'text-green-600' : 'text-red-600'
+                                    soldHistory.reduce((sum, stock) => sum + stock.total_realized_pl, 0) >= 0 ? 'text-green-600' : 'text-red-600'
                                 }`}
                             >
-                                {soldHistory.reduce((sum, t) => sum + t.realized_pl, 0) >= 0 ? '+' : ''}
-                                {formatINR(soldHistory.reduce((sum, t) => sum + t.realized_pl, 0))}
+                                {(() => {
+                                    const totalPL = soldHistory.reduce((sum, stock) => sum + stock.total_realized_pl, 0);
+                                    return `${totalPL >= 0 ? '+' : ''}${formatINR(totalPL)}`;
+                                })()}
                             </div>
                         </div>
                     </div>
@@ -1145,7 +1220,7 @@ const SoldHistoryTable = ({ soldHistory }: { soldHistory: any[] }) => {
 };
 
 const EquityHoldingPage = () => {
-    const { holdings, portfolioMetrics, dividendSummary } = usePage().props as any;
+    const { holdings, portfolioMetrics, dividendSummary, capitalGainsSummary } = usePage().props as any;
     const [modalOpen, setModalOpen] = useState(false);
     const [editModalOpen, setEditModalOpen] = useState(false);
     const [editingTransaction, setEditingTransaction] = useState<any>(null);
@@ -1344,7 +1419,7 @@ const EquityHoldingPage = () => {
             </div>
 
             {/* Summary Cards - Compact Design */}
-            <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-5">
+            <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
                 <Card className="border-l-4 border-l-blue-500">
                     <CardContent className="p-3">
                         <div className="mb-1 text-xs font-medium text-gray-600">Total Investment</div>
@@ -1367,6 +1442,11 @@ const EquityHoldingPage = () => {
                             ({totalGainLossPercent >= 0 ? '+' : ''}
                             {totalGainLossPercent.toFixed(2)}%)
                         </div>
+                        {/* STCG/LTCG Breakdown */}
+                        <div className="mt-1 text-xs text-gray-600">
+                            STCG: ₹{Math.round(capitalGainsSummary?.stcg_total || 0).toLocaleString('en-IN')} | LTCG: ₹
+                            {Math.round(capitalGainsSummary?.ltcg_total || 0).toLocaleString('en-IN')}
+                        </div>
                     </CardContent>
                 </Card>
                 <Card className="border-l-4 border-l-green-500">
@@ -1382,70 +1462,60 @@ const EquityHoldingPage = () => {
                         )}
                     </CardContent>
                 </Card>
-                <Card className="border-l-4 border-l-red-500">
-                    <CardContent className="p-3">
-                        <div className="mb-1 text-xs font-medium text-gray-600">Today's Change</div>
-                        <div className={`text-lg font-bold ${portfolioMetrics?.todaysChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {portfolioMetrics?.todaysChange >= 0 ? '+' : ''}₹{Math.round(portfolioMetrics?.todaysChange || 0).toLocaleString('en-IN')}
-                        </div>
-                        <div className={`text-xs ${portfolioMetrics?.todaysChangePercent >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                            ({portfolioMetrics?.todaysChangePercent >= 0 ? '+' : ''}
-                            {portfolioMetrics?.todaysChangePercent?.toFixed(2) || '0.00'}%)
-                        </div>
-                    </CardContent>
-                </Card>
             </div>
 
-            {/* Additional Summary Cards - Compact */}
-            <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
-                <Card className="border-l-4 border-l-green-400">
-                    <CardContent className="p-3">
-                        <div className="mb-1 text-xs font-medium text-gray-600">Best Performer</div>
-                        {portfolioMetrics?.bestPerformers?.length > 0 ? (
-                            <>
-                                <div className="text-sm font-bold text-green-600">{portfolioMetrics.bestPerformers[0].symbol}</div>
-                                <div className="text-xs text-green-500">+{portfolioMetrics.bestPerformers[0].plPercent?.toFixed(2)}%</div>
-                            </>
-                        ) : (
-                            <div className="text-sm font-bold text-gray-400">-</div>
-                        )}
-                    </CardContent>
-                </Card>
+            {/* Additional Summary Cards - Only show when NOT in sold history mode */}
+            {!showHistory && (
+                <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
+                    <Card className="border-l-4 border-l-green-400">
+                        <CardContent className="p-3">
+                            <div className="mb-1 text-xs font-medium text-gray-600">Best Performer</div>
+                            {portfolioMetrics?.bestPerformers?.length > 0 ? (
+                                <>
+                                    <div className="text-sm font-bold text-green-600">{portfolioMetrics.bestPerformers[0].symbol}</div>
+                                    <div className="text-xs text-green-500">+{portfolioMetrics.bestPerformers[0].plPercent?.toFixed(2)}%</div>
+                                </>
+                            ) : (
+                                <div className="text-sm font-bold text-gray-400">-</div>
+                            )}
+                        </CardContent>
+                    </Card>
 
-                <Card className="border-l-4 border-l-red-400">
-                    <CardContent className="p-3">
-                        <div className="mb-1 text-xs font-medium text-gray-600">Worst Performer</div>
-                        {portfolioMetrics?.worstPerformers?.length > 0 ? (
-                            <>
-                                <div className="text-sm font-bold text-red-600">{portfolioMetrics.worstPerformers[0].symbol}</div>
-                                <div className="text-xs text-red-500">{portfolioMetrics.worstPerformers[0].plPercent?.toFixed(2)}%</div>
-                            </>
-                        ) : (
-                            <div className="text-sm font-bold text-gray-400">-</div>
-                        )}
-                    </CardContent>
-                </Card>
+                    <Card className="border-l-4 border-l-red-400">
+                        <CardContent className="p-3">
+                            <div className="mb-1 text-xs font-medium text-gray-600">Worst Performer</div>
+                            {portfolioMetrics?.worstPerformers?.length > 0 ? (
+                                <>
+                                    <div className="text-sm font-bold text-red-600">{portfolioMetrics.worstPerformers[0].symbol}</div>
+                                    <div className="text-xs text-red-500">{portfolioMetrics.worstPerformers[0].plPercent?.toFixed(2)}%</div>
+                                </>
+                            ) : (
+                                <div className="text-sm font-bold text-gray-400">-</div>
+                            )}
+                        </CardContent>
+                    </Card>
 
-                <Card className="border-l-4 border-l-blue-400">
-                    <CardContent className="p-3">
-                        <div className="mb-1 text-xs font-medium text-gray-600">Portfolio Diversity</div>
-                        <div className="text-sm font-bold">{portfolioMetrics?.portfolioDiversity?.totalHoldings || 0} Holdings</div>
-                        <div className="text-xs text-gray-500">
-                            Max: {portfolioMetrics?.portfolioDiversity?.maxConcentration?.toFixed(1) || '0.0'}%
-                        </div>
-                    </CardContent>
-                </Card>
+                    <Card className="border-l-4 border-l-blue-400">
+                        <CardContent className="p-3">
+                            <div className="mb-1 text-xs font-medium text-gray-600">Portfolio Diversity</div>
+                            <div className="text-sm font-bold">{portfolioMetrics?.portfolioDiversity?.totalHoldings || 0} Holdings</div>
+                            <div className="text-xs text-gray-500">
+                                Max: {portfolioMetrics?.portfolioDiversity?.maxConcentration?.toFixed(1) || '0.0'}%
+                            </div>
+                        </CardContent>
+                    </Card>
 
-                <Card className="border-l-4 border-l-purple-400">
-                    <CardContent className="p-3">
-                        <div className="mb-1 text-xs font-medium text-gray-600">Upcoming Dividends</div>
-                        <div className="text-sm font-bold text-purple-600">{dividendSummary?.upcoming_dividends?.length || 0}</div>
-                        <div className="text-xs text-gray-500">
-                            {dividendSummary?.upcoming_dividends?.length > 0 ? 'Expected Soon' : 'None Scheduled'}
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
+                    <Card className="border-l-4 border-l-purple-400">
+                        <CardContent className="p-3">
+                            <div className="mb-1 text-xs font-medium text-gray-600">Upcoming Dividends</div>
+                            <div className="text-sm font-bold text-purple-600">{dividendSummary?.upcoming_dividends?.length || 0}</div>
+                            <div className="text-xs text-gray-500">
+                                {dividendSummary?.upcoming_dividends?.length > 0 ? 'Expected Soon' : 'None Scheduled'}
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+            )}
 
             {/* Sold History Table */}
             {showHistory && <SoldHistoryTable soldHistory={soldHistory} />}
