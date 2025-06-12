@@ -14,7 +14,7 @@ class UpdateStockPrices extends Command
      *
      * @var string
      */
-    protected $signature = 'stock-prices:update';
+    protected $signature = 'stock-prices:update {--stock= : Update prices for specific stock ID}';
 
     /**
      * The console command description.
@@ -31,8 +31,20 @@ class UpdateStockPrices extends Command
      */
     public function handle()
     {
-        // Get all unique stocks from transactions
-        $stocks = Stock::all();
+        $stockId = $this->option('stock');
+
+        if ($stockId) {
+            // Update specific stock
+            $stock = Stock::find($stockId);
+            if (!$stock) {
+                $this->error("Stock with ID {$stockId} not found");
+                return 1;
+            }
+            $stocks = collect([$stock]);
+        } else {
+            // Get all unique stocks from transactions
+            $stocks = Stock::all();
+        }
 
         if ($stocks->isEmpty()) {
             $this->info('No stocks found to update');

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Stock;
 use App\Models\StockTransaction;
+use App\Services\DividendService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\Artisan;
@@ -11,6 +12,13 @@ use Illuminate\Support\Facades\Auth;
 
 class EquityHoldingController extends Controller
 {
+    private $dividendService;
+
+    public function __construct(DividendService $dividendService)
+    {
+        $this->dividendService = $dividendService;
+    }
+
     public function index()
     {
         $user = Auth::user();
@@ -21,9 +29,13 @@ class EquityHoldingController extends Controller
         // Calculate additional metrics
         $portfolioMetrics = $this->calculatePortfolioMetrics($holdings);
 
+        // Get dividend summary for the user
+        $dividendSummary = $this->dividendService->getUserDividendSummary($user->id);
+
         return Inertia::render('EquityHolding/Index', [
             'holdings' => $holdings,
             'portfolioMetrics' => $portfolioMetrics,
+            'dividendSummary' => $dividendSummary,
         ]);
     }
 
@@ -206,30 +218,54 @@ class EquityHoldingController extends Controller
         return response()->json($soldHistory);
     }
 
-    public function syncPrices()
+    public function syncPrices(Request $request)
     {
         try {
-            // Run the stock prices update command
-            Artisan::call('stock-prices:update');
-            $output = Artisan::output();
+            $stockIds = $request->input('stock_ids');
 
-            // Parse the output to get success/failure counts
-            preg_match('/Successfully updated: (\d+) stocks/', $output, $successMatches);
-            preg_match('/Failed to update: (\d+) stocks/', $output, $failMatches);
-
-            $successCount = $successMatches[1] ?? 0;
-            $failCount = $failMatches[1] ?? 0;
-
-            if ($successCount > 0) {
-                $message = "✅ Successfully updated {$successCount} stock prices using multi-API system";
-                if ($failCount > 0) {
-                    $message .= " (❌ {$failCount} failed)";
+            if ($stockIds) {
+                // Update prices for specific stocks only
+                $command = 'stock-prices:update';
+                foreach ($stockIds as $stockId) {
+                    Artisan::call($command, ['--stock' => $stockId]);
                 }
-                return redirect()->route('equity-holding.index')->with('success', $message);
+                $output = "Successfully updated prices for user's portfolio stocks";
             } else {
-                return redirect()->route('equity-holding.index')->with('error', "❌ Failed to update any stock prices. All APIs may be unavailable.");
+                // Run the stock prices update command for all stocks
+                Artisan::call('stock-prices:update');
+                $output = Artisan::output();
             }
+
+            // Parse the output to get success/failure counts (for all stocks sync)
+            if (!$stockIds) {
+                preg_match('/Successfully updated: (\d+) stocks/', $output, $successMatches);
+                preg_match('/Failed to update: (\d+) stocks/', $output, $failMatches);
+
+                $successCount = $successMatches[1] ?? 0;
+                $failCount = $failMatches[1] ?? 0;
+
+                if ($successCount > 0) {
+                    $message = "✅ Successfully updated {$successCount} stock prices using multi-API system";
+                    if ($failCount > 0) {
+                        $message .= " (❌ {$failCount} failed)";
+                    }
+                } else {
+                    $message = "❌ Failed to update any stock prices. All APIs may be unavailable.";
+                }
+            } else {
+                $message = "✅ Successfully updated prices for your portfolio stocks";
+            }
+
+            // Check if this is an AJAX request (from frontend)
+            if ($request->wantsJson()) {
+                return response()->json(['success' => true, 'message' => $message]);
+            }
+
+            return redirect()->route('equity-holding.index')->with('success', $message);
         } catch (\Exception $e) {
+            if ($request->wantsJson()) {
+                return response()->json(['success' => false, 'message' => 'Failed to sync prices: ' . $e->getMessage()], 500);
+            }
             return redirect()->route('equity-holding.index')->with('error', 'Failed to sync prices: ' . $e->getMessage());
         }
     }
@@ -425,6 +461,10 @@ class EquityHoldingController extends Controller
                 // Collect all exchanges for this symbol
                 $exchanges = $stockTransactions->pluck('stock.exchange')->unique()->implode('/');
 
+                // Get dividend information for this stock
+                $dividendEligibility = $this->dividendService->calculateDividendEligibility($userId, $representativeStock->id);
+                $roiWithDividends = $this->dividendService->getROIWithDividends($userId, $representativeStock->id);
+
                 // Enhanced transactions with additional metrics (only show current segment transactions)
                 $currentSegmentTransactionsForDisplay = $currentSegmentTransactions->sortByDesc('transaction_date');
                 $enhancedTransactions = $currentSegmentTransactionsForDisplay->map(function ($transaction) use ($currentPrice) {
@@ -474,6 +514,25 @@ class EquityHoldingController extends Controller
                     'buy_transaction_count' => $currentSegmentTransactions->where('transaction_type', 'buy')->count(),
                     'sell_transaction_count' => $currentSegmentTransactions->where('transaction_type', 'sell')->count(),
                     'transactions' => $enhancedTransactions->values(),
+                    // Dividend information
+                    'dividend_data' => [
+                        'total_dividends_received' => round($roiWithDividends['total_dividends_received'], 2),
+                        'pending_dividends' => round($roiWithDividends['pending_dividends'], 2),
+                        'dividend_yield' => round($roiWithDividends['dividend_yield'], 2),
+                        'dividend_adjusted_roi' => round($roiWithDividends['dividend_adjusted_roi'], 2),
+                        'recent_dividends' => collect($dividendEligibility)->take(3)->map(function ($dividend) {
+                            return [
+                                'ex_dividend_date' => $dividend['dividend_payment']->ex_dividend_date,
+                                'dividend_date' => $dividend['dividend_payment']->dividend_date,
+                                'amount_per_share' => $dividend['dividend_payment']->dividend_amount,
+                                'total_amount' => $dividend['total_amount'],
+                                'status' => $dividend['user_record']->status,
+                            ];
+                        })->toArray(),
+                        'has_upcoming_dividend' => collect($dividendEligibility)->filter(function ($dividend) {
+                            return $dividend['dividend_payment']->dividend_date >= now();
+                        })->isNotEmpty(),
+                    ],
                 ];
 
                 $totalPortfolioValue += $currentValue;
@@ -560,5 +619,101 @@ class EquityHoldingController extends Controller
                 'sectorBreakdown' => $sectorBreakdown
             ]
         ];
+    }
+
+    /**
+     * Update dividend data for stocks
+     */
+    public function updateDividendData(Request $request)
+    {
+        try {
+            $stockIds = $request->get('stock_ids', []);
+
+            if (empty($stockIds)) {
+                // Update all user's stocks
+                $user = Auth::user();
+                $stocks = Stock::whereHas('transactions', function ($query) use ($user) {
+                    $query->where('user_id', $user->id);
+                })->get();
+            } else {
+                $stocks = Stock::whereIn('id', $stockIds)->get();
+            }
+
+            $updated = 0;
+            foreach ($stocks as $stock) {
+                if ($this->dividendService->updateDividendData($stock)) {
+                    $updated++;
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => "Updated dividend data for {$updated} stocks",
+                'updated_count' => $updated,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to update dividend data: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Get detailed dividend information for a specific stock
+     */
+    public function getDividendDetails($stockId)
+    {
+        try {
+            $user = Auth::user();
+            $eligibility = $this->dividendService->calculateDividendEligibility($user->id, $stockId);
+            $roiData = $this->dividendService->getROIWithDividends($user->id, $stockId);
+
+            return response()->json([
+                'success' => true,
+                'eligibility' => $eligibility,
+                'roi_data' => $roiData,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to get dividend details: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Mark dividend as received
+     */
+    public function markDividendReceived(Request $request)
+    {
+        $validated = $request->validate([
+            'user_dividend_record_id' => 'required|integer|exists:user_dividend_records,id',
+            'received_date' => 'required|date',
+            'notes' => 'nullable|string',
+        ]);
+
+        try {
+            $user = Auth::user();
+            $record = \App\Models\UserDividendRecord::where('id', $validated['user_dividend_record_id'])
+                ->where('user_id', $user->id)
+                ->firstOrFail();
+
+            $record->update([
+                'status' => 'received',
+                'received_date' => $validated['received_date'],
+                'notes' => $validated['notes'],
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Dividend marked as received',
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to mark dividend as received: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 }

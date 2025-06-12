@@ -691,6 +691,7 @@ const HoldingsTable = ({
                         <th className="px-2 py-2 text-left font-semibold">Weight %</th>
                         <th className="px-2 py-2 text-left font-semibold">52W Range</th>
                         <th className="px-2 py-2 text-left font-semibold">Sector</th>
+                        <th className="px-2 py-2 text-left font-semibold">Dividend</th>
                         <th className="px-2 py-2 text-left font-semibold">Day Change</th>
                         <th className="px-2 py-2 text-left font-semibold">Actions</th>
                     </tr>
@@ -747,6 +748,31 @@ const HoldingsTable = ({
                                 </td>
                                 <td className="px-2 py-2 whitespace-nowrap">
                                     <span className="rounded bg-blue-100 px-2 py-1 text-xs text-blue-800">{holding.sector || 'Unknown'}</span>
+                                </td>
+                                <td className="px-2 py-2 whitespace-nowrap">
+                                    {holding.dividend_data && (
+                                        <div className="text-xs">
+                                            {holding.dividend_data.total_dividends_received > 0 && (
+                                                <div className="font-medium text-green-600">
+                                                    ₹{holding.dividend_data.total_dividends_received.toLocaleString('en-IN')}
+                                                </div>
+                                            )}
+                                            {holding.dividend_data.pending_dividends > 0 && (
+                                                <div className="text-orange-600">
+                                                    Pending: ₹{holding.dividend_data.pending_dividends.toLocaleString('en-IN')}
+                                                </div>
+                                            )}
+                                            {holding.dividend_data.dividend_yield > 0 && (
+                                                <div className="text-blue-600">Yield: {holding.dividend_data.dividend_yield.toFixed(2)}%</div>
+                                            )}
+                                            {holding.dividend_data.has_upcoming_dividend && (
+                                                <div className="font-medium text-purple-600">📅 Upcoming</div>
+                                            )}
+                                            {!holding.dividend_data.total_dividends_received &&
+                                                !holding.dividend_data.pending_dividends &&
+                                                !holding.dividend_data.has_upcoming_dividend && <span className="text-gray-400">No dividends</span>}
+                                        </div>
+                                    )}
                                 </td>
                                 <td className="px-2 py-2 whitespace-nowrap">
                                     {holding.day_change !== null && holding.day_change !== undefined ? (
@@ -930,18 +956,50 @@ const HoldingsCards = ({ holdings, openSellModal }: { holdings: any[]; openSellM
                             <div className="flex-1 md:w-1/4">
                                 <span className="font-medium">Current Price:</span> {formatINR(holding.current_price)}
                             </div>
-                            <div className="mt-2 flex-shrink-0 md:mt-0">
-                                <Button
-                                    size="sm"
-                                    variant="destructive"
-                                    onClick={() => openSellModal(holding)}
-                                    className="h-7 px-3 text-xs"
-                                    disabled={holding.quantity <= 0}
-                                >
-                                    Sell
-                                </Button>
-                            </div>
                         </div>
+
+                        {/* Dividend Information for Mobile */}
+                        {holding.dividend_data &&
+                            (holding.dividend_data.total_dividends_received > 0 ||
+                                holding.dividend_data.pending_dividends > 0 ||
+                                holding.dividend_data.has_upcoming_dividend) && (
+                                <div className="mt-3 border-t pt-3">
+                                    <div className="mb-2 text-sm font-medium text-gray-700">Dividend Information</div>
+                                    <div className="flex flex-wrap gap-2 text-sm">
+                                        {holding.dividend_data.total_dividends_received > 0 && (
+                                            <span className="rounded bg-green-100 px-2 py-1 text-xs text-green-800">
+                                                Received: ₹{holding.dividend_data.total_dividends_received.toLocaleString('en-IN')}
+                                            </span>
+                                        )}
+                                        {holding.dividend_data.pending_dividends > 0 && (
+                                            <span className="rounded bg-orange-100 px-2 py-1 text-xs text-orange-800">
+                                                Pending: ₹{holding.dividend_data.pending_dividends.toLocaleString('en-IN')}
+                                            </span>
+                                        )}
+                                        {holding.dividend_data.dividend_yield > 0 && (
+                                            <span className="rounded bg-blue-100 px-2 py-1 text-xs text-blue-800">
+                                                Yield: {holding.dividend_data.dividend_yield.toFixed(2)}%
+                                            </span>
+                                        )}
+                                        {holding.dividend_data.has_upcoming_dividend && (
+                                            <span className="rounded bg-purple-100 px-2 py-1 text-xs text-purple-800">📅 Upcoming Dividend</span>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                        <div className="mt-2 flex-shrink-0 md:mt-0">
+                            <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => openSellModal(holding)}
+                                className="h-7 px-3 text-xs"
+                                disabled={holding.quantity <= 0}
+                            >
+                                Sell
+                            </Button>
+                        </div>
+
                         {expandedCards.has(holding.stock_id) && (
                             <div className="mt-4 space-y-2">
                                 <div className="text-sm font-medium">Transactions:</div>
@@ -1087,7 +1145,7 @@ const SoldHistoryTable = ({ soldHistory }: { soldHistory: any[] }) => {
 };
 
 const EquityHoldingPage = () => {
-    const { holdings, portfolioMetrics } = usePage().props as any;
+    const { holdings, portfolioMetrics, dividendSummary } = usePage().props as any;
     const [modalOpen, setModalOpen] = useState(false);
     const [editModalOpen, setEditModalOpen] = useState(false);
     const [editingTransaction, setEditingTransaction] = useState<any>(null);
@@ -1138,7 +1196,100 @@ const EquityHoldingPage = () => {
         }
     };
 
-    // Fetch sold history when history toggle is enabled
+    const syncPrices = async () => {
+        setSyncing(true);
+        try {
+            const response = await fetch('/equity-holding/sync-prices', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content || '',
+                },
+            });
+
+            if (response.ok) {
+                window.location.reload();
+            } else {
+                alert('❌ Failed to sync prices. Please try again.');
+            }
+        } catch (error) {
+            alert('❌ Failed to sync prices. Please check your connection.');
+        } finally {
+            setSyncing(false);
+        }
+    };
+
+    const syncAllData = async () => {
+        setSyncing(true);
+        try {
+            // Get stock IDs from current holdings
+            const userStockIds = holdings.map((holding: any) => holding.stock_id);
+
+            // First sync prices for user's stocks only
+            const priceResponse = await fetch('/equity-holding/sync-prices', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content || '',
+                },
+                body: JSON.stringify({
+                    stock_ids: userStockIds,
+                }),
+            });
+
+            if (!priceResponse.ok) {
+                throw new Error('Failed to sync prices');
+            }
+
+            // Then sync dividends for user's stocks only
+            const dividendResponse = await fetch('/equity-holding/update-dividend-data', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': (document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content || '',
+                },
+                body: JSON.stringify({
+                    stock_ids: userStockIds,
+                }),
+            });
+
+            if (dividendResponse.ok) {
+                const data = await dividendResponse.json();
+
+                // Refresh only the equity holding data without full page reload
+                await refreshEquityData();
+
+                alert(`✅ Prices and dividends synced successfully! ${data.message}`);
+            } else {
+                // Still refresh data even if dividend sync failed
+                await refreshEquityData();
+                alert('✅ Prices synced, but dividend sync failed. Please try dividend sync separately.');
+            }
+        } catch (error) {
+            alert('❌ Failed to sync data. Please check your connection.');
+        } finally {
+            setSyncing(false);
+        }
+    };
+
+    const refreshEquityData = async () => {
+        try {
+            const response = await fetch('/equity-holding', {
+                headers: {
+                    Accept: 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+            });
+
+            if (response.ok) {
+                // Use Inertia's visit to reload just this page's data
+                router.reload({ only: ['holdings', 'portfolioMetrics', 'dividendSummary'] });
+            }
+        } catch (error) {
+            console.error('Failed to refresh data:', error);
+        }
+    };
+
     React.useEffect(() => {
         if (showHistory) {
             fetchSoldHistory();
@@ -1162,27 +1313,10 @@ const EquityHoldingPage = () => {
 
                     <Button
                         variant="outline"
+                        size="sm"
                         className="border-blue-200 text-blue-700 hover:bg-blue-50"
                         disabled={syncing}
-                        onClick={() => {
-                            setSyncing(true);
-                            router.post(
-                                '/equity-holding/sync-prices',
-                                {},
-                                {
-                                    onSuccess: () => {
-                                        setSyncing(false);
-                                        // You can add a toast notification here if you have one
-                                        alert('✅ Stock prices synced successfully!');
-                                    },
-                                    onError: (error) => {
-                                        setSyncing(false);
-                                        console.error('Sync error:', error);
-                                        alert('❌ Failed to sync stock prices. Please try again.');
-                                    },
-                                },
-                            );
-                        }}
+                        onClick={syncAllData}
                     >
                         <svg className={`mr-2 h-4 w-4 ${syncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path
@@ -1192,11 +1326,10 @@ const EquityHoldingPage = () => {
                                 d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                             />
                         </svg>
-                        {syncing ? 'Syncing...' : 'Sync Prices'}
+                        {syncing ? 'Syncing...' : 'Sync All Data'}
                     </Button>
                 </div>
 
-                {/* History Toggle */}
                 <div className="flex items-center gap-3">
                     <label className="flex items-center gap-2 text-sm font-medium">
                         <input
@@ -1210,101 +1343,105 @@ const EquityHoldingPage = () => {
                 </div>
             </div>
 
-            {/* Summary Cards */}
-            <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-8">
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Total Investment</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{formatINR(totalInvestment)}</div>
+            {/* Summary Cards - Compact Design */}
+            <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-5">
+                <Card className="border-l-4 border-l-blue-500">
+                    <CardContent className="p-3">
+                        <div className="mb-1 text-xs font-medium text-gray-600">Total Investment</div>
+                        <div className="text-lg font-bold">{formatINR(totalInvestment)}</div>
                     </CardContent>
                 </Card>
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Current Value</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">₹{Math.round(totalCurrentValue).toLocaleString('en-IN')}</div>
+                <Card className="border-l-4 border-l-purple-500">
+                    <CardContent className="p-3">
+                        <div className="mb-1 text-xs font-medium text-gray-600">Current Value</div>
+                        <div className="text-lg font-bold">₹{Math.round(totalCurrentValue).toLocaleString('en-IN')}</div>
                     </CardContent>
                 </Card>
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Total P&L</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className={`text-2xl font-bold ${totalGainLoss >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            ₹{Math.round(totalGainLoss).toLocaleString('en-IN')}
+                <Card className="border-l-4 border-l-orange-500">
+                    <CardContent className="p-3">
+                        <div className="mb-1 text-xs font-medium text-gray-600">Total P&L</div>
+                        <div className={`text-lg font-bold ${totalGainLoss >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {totalGainLoss >= 0 ? '+' : ''}₹{Math.round(totalGainLoss).toLocaleString('en-IN')}
+                        </div>
+                        <div className={`text-xs ${totalGainLossPercent >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                            ({totalGainLossPercent >= 0 ? '+' : ''}
+                            {totalGainLossPercent.toFixed(2)}%)
                         </div>
                     </CardContent>
                 </Card>
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Total P&L %</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className={`text-2xl font-bold ${totalGainLossPercent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {totalGainLossPercent.toFixed(2)}%
+                <Card className="border-l-4 border-l-green-500">
+                    <CardContent className="p-3">
+                        <div className="mb-1 text-xs font-medium text-gray-600">Dividends Received</div>
+                        <div className="text-lg font-bold text-green-600">
+                            ₹{Math.round(dividendSummary?.total_received_amount || 0).toLocaleString('en-IN')}
                         </div>
+                        {dividendSummary?.pending_amount > 0 && (
+                            <div className="text-xs text-orange-600">
+                                Pending: ₹{Math.round(dividendSummary.pending_amount).toLocaleString('en-IN')}
+                            </div>
+                        )}
                     </CardContent>
                 </Card>
-
-                {/* New Metric Cards */}
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Today's Change</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className={`text-2xl font-bold ${portfolioMetrics?.todaysChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                <Card className="border-l-4 border-l-red-500">
+                    <CardContent className="p-3">
+                        <div className="mb-1 text-xs font-medium text-gray-600">Today's Change</div>
+                        <div className={`text-lg font-bold ${portfolioMetrics?.todaysChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                             {portfolioMetrics?.todaysChange >= 0 ? '+' : ''}₹{Math.round(portfolioMetrics?.todaysChange || 0).toLocaleString('en-IN')}
                         </div>
-                        <div className={`text-sm ${portfolioMetrics?.todaysChangePercent >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                        <div className={`text-xs ${portfolioMetrics?.todaysChangePercent >= 0 ? 'text-green-500' : 'text-red-500'}`}>
                             ({portfolioMetrics?.todaysChangePercent >= 0 ? '+' : ''}
                             {portfolioMetrics?.todaysChangePercent?.toFixed(2) || '0.00'}%)
                         </div>
                     </CardContent>
                 </Card>
+            </div>
 
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Best Performer</CardTitle>
-                    </CardHeader>
-                    <CardContent>
+            {/* Additional Summary Cards - Compact */}
+            <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4">
+                <Card className="border-l-4 border-l-green-400">
+                    <CardContent className="p-3">
+                        <div className="mb-1 text-xs font-medium text-gray-600">Best Performer</div>
                         {portfolioMetrics?.bestPerformers?.length > 0 ? (
                             <>
-                                <div className="text-lg font-bold text-green-600">{portfolioMetrics.bestPerformers[0].symbol}</div>
-                                <div className="text-sm text-green-500">+{portfolioMetrics.bestPerformers[0].plPercent?.toFixed(2)}%</div>
+                                <div className="text-sm font-bold text-green-600">{portfolioMetrics.bestPerformers[0].symbol}</div>
+                                <div className="text-xs text-green-500">+{portfolioMetrics.bestPerformers[0].plPercent?.toFixed(2)}%</div>
                             </>
                         ) : (
-                            <div className="text-lg font-bold text-gray-400">-</div>
+                            <div className="text-sm font-bold text-gray-400">-</div>
                         )}
                     </CardContent>
                 </Card>
 
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Worst Performer</CardTitle>
-                    </CardHeader>
-                    <CardContent>
+                <Card className="border-l-4 border-l-red-400">
+                    <CardContent className="p-3">
+                        <div className="mb-1 text-xs font-medium text-gray-600">Worst Performer</div>
                         {portfolioMetrics?.worstPerformers?.length > 0 ? (
                             <>
-                                <div className="text-lg font-bold text-red-600">{portfolioMetrics.worstPerformers[0].symbol}</div>
-                                <div className="text-sm text-red-500">{portfolioMetrics.worstPerformers[0].plPercent?.toFixed(2)}%</div>
+                                <div className="text-sm font-bold text-red-600">{portfolioMetrics.worstPerformers[0].symbol}</div>
+                                <div className="text-xs text-red-500">{portfolioMetrics.worstPerformers[0].plPercent?.toFixed(2)}%</div>
                             </>
                         ) : (
-                            <div className="text-lg font-bold text-gray-400">-</div>
+                            <div className="text-sm font-bold text-gray-400">-</div>
                         )}
                     </CardContent>
                 </Card>
 
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium">Portfolio Diversity</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-lg font-bold">{portfolioMetrics?.portfolioDiversity?.totalHoldings || 0} Holdings</div>
-                        <div className="text-sm text-gray-500">
+                <Card className="border-l-4 border-l-blue-400">
+                    <CardContent className="p-3">
+                        <div className="mb-1 text-xs font-medium text-gray-600">Portfolio Diversity</div>
+                        <div className="text-sm font-bold">{portfolioMetrics?.portfolioDiversity?.totalHoldings || 0} Holdings</div>
+                        <div className="text-xs text-gray-500">
                             Max: {portfolioMetrics?.portfolioDiversity?.maxConcentration?.toFixed(1) || '0.0'}%
+                        </div>
+                    </CardContent>
+                </Card>
+
+                <Card className="border-l-4 border-l-purple-400">
+                    <CardContent className="p-3">
+                        <div className="mb-1 text-xs font-medium text-gray-600">Upcoming Dividends</div>
+                        <div className="text-sm font-bold text-purple-600">{dividendSummary?.upcoming_dividends?.length || 0}</div>
+                        <div className="text-xs text-gray-500">
+                            {dividendSummary?.upcoming_dividends?.length > 0 ? 'Expected Soon' : 'None Scheduled'}
                         </div>
                     </CardContent>
                 </Card>

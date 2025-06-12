@@ -47,6 +47,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/equity-holding/{stockId}/holding-info', [EquityHoldingController::class, 'getHoldingInfo'])->name('equity-holding.holding-info');
         Route::get('/equity-holding/search-stocks', [EquityHoldingController::class, 'searchStocks'])->name('equity-holding.search-stocks');
         Route::get('/equity-holding/sold-history', [EquityHoldingController::class, 'getSoldHistory'])->name('equity-holding.sold-history');
+
+        // Dividend Routes
+        Route::post('/equity-holding/update-dividend-data', [EquityHoldingController::class, 'updateDividendData'])->name('equity-holding.update-dividend-data');
+        Route::get('/equity-holding/{stockId}/dividend-details', [EquityHoldingController::class, 'getDividendDetails'])->name('equity-holding.dividend-details');
+        Route::post('/equity-holding/mark-dividend-received', [EquityHoldingController::class, 'markDividendReceived'])->name('equity-holding.mark-dividend-received');
     });
 });
 

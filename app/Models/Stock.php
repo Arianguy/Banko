@@ -37,4 +37,29 @@ class Stock extends Model
     {
         return $this->hasMany(StockTransaction::class)->where('user_id', $userId);
     }
+
+    public function dividendPayments(): HasMany
+    {
+        return $this->hasMany(DividendPayment::class);
+    }
+
+    public function userDividendRecords(): HasMany
+    {
+        return $this->hasMany(UserDividendRecord::class);
+    }
+
+    // Get latest dividend payment information
+    public function latestDividend()
+    {
+        return $this->dividendPayments()->orderBy('ex_dividend_date', 'desc')->first();
+    }
+
+    // Get dividend payments for a specific date range
+    public function dividendsInRange($startDate, $endDate)
+    {
+        return $this->dividendPayments()
+            ->whereBetween('ex_dividend_date', [$startDate, $endDate])
+            ->orderBy('ex_dividend_date', 'desc')
+            ->get();
+    }
 }
