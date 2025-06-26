@@ -614,16 +614,19 @@ class EquityHoldingController extends Controller
                 $totalQuantity -= $transaction->quantity;
                 $totalSellProceeds += $transaction->net_amount;
 
-                // Calculate realized P&L for historical reporting
-                $avgCostBasis = $totalInvestment > 0 ? $totalInvestment / ($totalQuantity + $transaction->quantity) : 0;
-                $costOfSoldShares = $avgCostBasis * $transaction->quantity;
-                $realizedPL += $transaction->net_amount - $costOfSoldShares;
+                // Calculate realized P&L using proper FIFO logic (this is just for historical display)
+                $realizedPL += $this->calculateRealizedGainLoss($userId, $transaction);
             }
 
             // Only show holdings where user currently owns shares
             if ($currentHoldingsQuantity > 0) {
                 // Calculate investment for current holdings only
-                $currentHoldingsInvestment = $currentHoldingTransactions->sum('net_amount');
+                $currentHoldingsInvestment = $currentHoldingTransactions->sum(function ($buyEntry) {
+                    $transaction = $buyEntry['transaction'];
+                    $remainingQuantity = $buyEntry['remaining'];
+                    // Calculate proportional investment for remaining shares
+                    return ($transaction->net_amount / $transaction->quantity) * $remainingQuantity;
+                });
 
                 // Calculate average price from current holdings
                 $avgPrice = $currentHoldingsInvestment > 0 && $currentHoldingsQuantity > 0
@@ -719,7 +722,7 @@ class EquityHoldingController extends Controller
                             ];
                         })->toArray(),
                         'has_upcoming_dividend' => collect($dividendEligibility)->filter(function ($dividend) {
-                            return $dividend['dividend_payment']->dividend_date >= now();
+                            return $dividend['dividend_payment']->dividend_date > now();
                         })->isNotEmpty(),
                     ],
                 ];

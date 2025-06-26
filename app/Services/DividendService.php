@@ -198,6 +198,11 @@ class DividendService
                         'record_date' => $dividend->ex_dividend_date,
                         'status' => $dividend->dividend_date <= Carbon::now() ? 'received' : 'qualified',
                     ]);
+                } else {
+                    // Update existing record status if dividend date has passed
+                    if ($dividend->dividend_date <= Carbon::now() && $userRecord->status === 'qualified') {
+                        $userRecord->update(['status' => 'received']);
+                    }
                 }
 
                 $eligibilityData[] = [
@@ -255,6 +260,12 @@ class DividendService
         ];
 
         foreach ($userDividendRecords as $record) {
+            // Update status if dividend date has passed
+            if ($record->dividendPayment->dividend_date <= Carbon::now() && $record->status === 'qualified') {
+                $record->update(['status' => 'received']);
+                $record->refresh();
+            }
+
             $summary['total_qualified_amount'] += $record->total_dividend_amount;
 
             if ($record->status === 'received' || $record->status === 'credited') {
@@ -262,7 +273,7 @@ class DividendService
             } else {
                 $summary['pending_amount'] += $record->total_dividend_amount;
 
-                if ($record->dividendPayment->dividend_date >= Carbon::now()) {
+                if ($record->dividendPayment->dividend_date > Carbon::now()) {
                     $summary['upcoming_dividends'][] = $record;
                 }
             }
@@ -285,9 +296,43 @@ class DividendService
             ->where('stock_id', $stockId)
             ->get();
 
-        // Calculate basic investment metrics
-        $totalInvestment = $transactions->where('transaction_type', 'buy')->sum('net_amount');
-        $currentQuantity = $this->calculateHoldingsOnDate($userId, $stockId, Carbon::now()->format('Y-m-d'));
+        // Calculate basic investment metrics - use current holdings investment, not total historical
+        $buyTransactions = $transactions->where('transaction_type', 'buy');
+        $sellTransactions = $transactions->where('transaction_type', 'sell');
+
+        // Calculate current holdings using FIFO
+        $buyQueue = collect();
+        $allTransactionsSorted = $transactions->sortBy(['transaction_date', 'id']);
+
+        foreach ($allTransactionsSorted as $transaction) {
+            if ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'bonus') {
+                $buyQueue->push([
+                    'transaction' => $transaction,
+                    'remaining' => $transaction->quantity
+                ]);
+            } elseif ($transaction->transaction_type === 'sell') {
+                $remainingToSell = $transaction->quantity;
+                while ($remainingToSell > 0 && $buyQueue->isNotEmpty()) {
+                    $buyEntry = $buyQueue->shift();
+                    if ($buyEntry['remaining'] <= $remainingToSell) {
+                        $remainingToSell -= $buyEntry['remaining'];
+                    } else {
+                        $buyEntry['remaining'] -= $remainingToSell;
+                        $buyQueue->prepend($buyEntry);
+                        $remainingToSell = 0;
+                    }
+                }
+            }
+        }
+
+        // Calculate current holdings investment
+        $totalInvestment = $buyQueue->sum(function ($buyEntry) {
+            $transaction = $buyEntry['transaction'];
+            $remainingQuantity = $buyEntry['remaining'];
+            return ($transaction->net_amount / $transaction->quantity) * $remainingQuantity;
+        });
+
+        $currentQuantity = $buyQueue->sum('remaining');
         $currentValue = $currentQuantity * $stock->current_price;
 
         // Calculate dividends received
@@ -295,7 +340,7 @@ class DividendService
             ->where('stock_id', $stockId)
             ->get();
 
-        $totalDividends = $dividendRecords->sum('total_dividend_amount');
+        $totalDividends = $dividendRecords->where('status', 'received')->sum('total_dividend_amount');
         $pendingDividends = $dividendRecords->where('status', 'qualified')->sum('total_dividend_amount');
 
         // Calculate ROI including dividends

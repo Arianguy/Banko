@@ -132,7 +132,9 @@ class UpdateStockPrices extends Command
     {
         $apiKey = env('ALPHA_VANTAGE_API_KEY');
         if (!$apiKey) {
-            throw new \Exception('Alpha Vantage API key not found');
+            // Instead of throwing, just skip Alpha Vantage if not configured
+            $this->line("⚠️  Alpha Vantage API key not found. Skipping Alpha Vantage for {$stock->symbol}.");
+            return null;
         }
 
         $symbols = [$stock->symbol . '.NS', $stock->symbol . '.BO', $stock->symbol];
