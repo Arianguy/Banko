@@ -4,6 +4,7 @@ use Inertia\Inertia;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\FixedDepositController;
 use App\Http\Controllers\BankController;
+use App\Http\Controllers\BankBalanceController;
 use App\Http\Controllers\PortfolioController;
 use App\Http\Controllers\EquityHoldingController;
 use App\Http\Controllers\DashboardController;
@@ -29,6 +30,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::put('fixed-deposits/{id}', [FixedDepositController::class, 'update'])->name('fixed-deposits.update');
         Route::post('/banks', [BankController::class, 'store']);
         Route::get('/banks', [BankController::class, 'index']);
+        
+        // Bank Balance Routes
+        Route::post('/bank-balances', [BankBalanceController::class, 'store'])->name('bank-balances.store');
+        
+        // Bank Account Routes
+        Route::get('/banks/{bankId}/accounts', [BankBalanceController::class, 'getAccountsByBank'])->name('banks.accounts');
+        Route::post('/bank-accounts', [BankBalanceController::class, 'storeAccount'])->name('bank-accounts.store');
 
         // Portfolio Routes
         Route::get('/api/portfolio/summary-metrics', [PortfolioController::class, 'getSummaryMetrics'])->name('api.portfolio.summary');

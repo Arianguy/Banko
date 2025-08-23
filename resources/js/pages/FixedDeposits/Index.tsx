@@ -20,6 +20,361 @@ function getDaysBalance(maturity_date: string) {
     return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
 
+const BankBalanceModal = ({ open, setOpen, banks }: { open: boolean; setOpen: (v: boolean) => void; banks: Array<{ id: number, name: string }> }) => {
+    const [updateDate, setUpdateDate] = useState('');
+    const [bankBalances, setBankBalances] = useState([{
+        bank_id: '',
+        account_id: '',
+        balance: ''
+    }]);
+    const [submitting, setSubmitting] = useState(false);
+    const [clientErrors, setClientErrors] = useState<any>({});
+    const [bankAccounts, setBankAccounts] = useState<{[key: string]: Array<{id: number, account_number: string, account_type: string}>}>({});
+    const [showAddAccountModal, setShowAddAccountModal] = useState(false);
+    const [newAccount, setNewAccount] = useState({ bank_id: '', account_number: '', account_type: '' });
+    const [addingAccount, setAddingAccount] = useState(false);
+    const { errors } = usePage().props as any;
+
+    // Reset form when modal opens
+    useEffect(() => {
+        if (open) {
+            setClientErrors({});
+            setUpdateDate('');
+            setBankBalances([{
+                bank_id: '',
+                account_id: '',
+                balance: ''
+            }]);
+        }
+    }, [open]);
+
+    // Fetch accounts when bank is selected
+    const fetchAccountsForBank = async (bankId: string) => {
+        if (!bankId || bankAccounts[bankId]) return;
+        
+        try {
+            const response = await fetch(`/banks/${bankId}/accounts`);
+            const accounts = await response.json();
+            setBankAccounts(prev => ({ ...prev, [bankId]: accounts }));
+        } catch (error) {
+            console.error('Error fetching accounts:', error);
+        }
+    };
+
+    const addBankBalance = () => {
+        setBankBalances([...bankBalances, {
+            bank_id: '',
+            account_id: '',
+            balance: ''
+        }]);
+    };
+
+    const removeBankBalance = (index: number) => {
+        if (bankBalances.length > 1) {
+            setBankBalances(bankBalances.filter((_, i) => i !== index));
+        }
+    };
+
+    const updateBankBalance = (index: number, field: string, value: string) => {
+        const updated = [...bankBalances];
+        updated[index] = { ...updated[index], [field]: value };
+        
+        // If bank is changed, reset account and fetch accounts
+        if (field === 'bank_id') {
+            updated[index].account_id = '';
+            if (value) {
+                fetchAccountsForBank(value);
+            }
+        }
+        
+        setBankBalances(updated);
+    };
+
+    const handleSubmit = () => {
+        setSubmitting(true);
+        setClientErrors({});
+
+        // Basic validation
+        const errors: any = {};
+        if (!updateDate) errors.update_date = 'Update date is required';
+        
+        bankBalances.forEach((balance, index) => {
+            if (!balance.bank_id) errors[`bank_balances.${index}.bank_id`] = 'Bank is required';
+            if (!balance.account_id) errors[`bank_balances.${index}.account_id`] = 'Account is required';
+            if (!balance.balance) errors[`bank_balances.${index}.balance`] = 'Balance is required';
+        });
+
+        if (Object.keys(errors).length > 0) {
+            setClientErrors(errors);
+            setSubmitting(false);
+            return;
+        }
+
+        // Convert account_id to account_number for backend
+        const formattedBalances = bankBalances.map(balance => {
+            const account = bankAccounts[balance.bank_id]?.find(acc => acc.id.toString() === balance.account_id);
+            return {
+                bank_id: balance.bank_id,
+                account_number: account?.account_number || '',
+                balance: balance.balance
+            };
+        });
+
+        router.post('/bank-balances', {
+            update_date: updateDate,
+            bank_balances: formattedBalances
+        }, {
+            onSuccess: () => {
+                setOpen(false);
+            },
+            onError: () => {
+                setSubmitting(false);
+            },
+            onFinish: () => {
+                setSubmitting(false);
+            }
+        });
+    };
+
+    const handleAddAccount = async () => {
+        if (!newAccount.bank_id || !newAccount.account_number) {
+            return;
+        }
+
+        setAddingAccount(true);
+        try {
+            const response = await fetch('/bank-accounts', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+                },
+                body: JSON.stringify(newAccount)
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                // Update local accounts state
+                setBankAccounts(prev => ({
+                    ...prev,
+                    [newAccount.bank_id]: [...(prev[newAccount.bank_id] || []), result.account]
+                }));
+                
+                // Reset form and close modal
+                setNewAccount({ bank_id: '', account_number: '', account_type: '' });
+                setShowAddAccountModal(false);
+            }
+        } catch (error) {
+            console.error('Error adding account:', error);
+        } finally {
+            setAddingAccount(false);
+        }
+    };
+
+    return (
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+                <DialogTitle>Update Bank Balance</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+                <div>
+                    <Label htmlFor="update_date">Update Date</Label>
+                    <Input
+                        id="update_date"
+                        type="date"
+                        value={updateDate}
+                        onChange={(e) => setUpdateDate(e.target.value)}
+                        className={clientErrors.update_date || errors?.update_date ? 'border-red-500' : ''}
+                    />
+                    {(clientErrors.update_date || errors?.update_date) && (
+                        <p className="text-red-500 text-sm mt-1">{clientErrors.update_date || errors?.update_date}</p>
+                    )}
+                </div>
+
+                {bankBalances.map((balance, index) => (
+                    <div key={index} className="border rounded-lg p-4 space-y-3">
+                        <div className="flex justify-between items-center">
+                            <h4 className="font-medium">Bank Balance {index + 1}</h4>
+                            {bankBalances.length > 1 && (
+                                <Button
+                                    type="button"
+                                    variant="destructive"
+                                    size="sm"
+                                    onClick={() => removeBankBalance(index)}
+                                >
+                                    Remove
+                                </Button>
+                            )}
+                        </div>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div>
+                                <Label htmlFor={`bank_${index}`}>Bank</Label>
+                                <Select
+                                    value={balance.bank_id}
+                                    onValueChange={(value) => updateBankBalance(index, 'bank_id', value)}
+                                >
+                                    <SelectTrigger className={clientErrors[`bank_balances.${index}.bank_id`] || errors?.[`bank_balances.${index}.bank_id`] ? 'border-red-500' : ''}>
+                                        <SelectValue placeholder="Select Bank" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {banks.map((bank) => (
+                                            <SelectItem key={bank.id} value={bank.id.toString()}>
+                                                {bank.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                {(clientErrors[`bank_balances.${index}.bank_id`] || errors?.[`bank_balances.${index}.bank_id`]) && (
+                                    <p className="text-red-500 text-sm mt-1">{clientErrors[`bank_balances.${index}.bank_id`] || errors?.[`bank_balances.${index}.bank_id`]}</p>
+                                )}
+                            </div>
+                            
+                            <div>
+                                <div className="flex items-center justify-between mb-1">
+                                    <Label htmlFor={`account_${index}`}>Account Number</Label>
+                                    {balance.bank_id && (
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => {
+                                                setNewAccount({ ...newAccount, bank_id: balance.bank_id });
+                                                setShowAddAccountModal(true);
+                                            }}
+                                            className="h-6 w-6 p-0 bg-black text-white hover:bg-gray-800 border-black"
+                                        >
+                                            +
+                                        </Button>
+                                    )}
+                                </div>
+                                <Select
+                                    value={balance.account_id}
+                                    onValueChange={(value) => updateBankBalance(index, 'account_id', value)}
+                                    disabled={!balance.bank_id}
+                                >
+                                    <SelectTrigger className={clientErrors[`bank_balances.${index}.account_id`] || errors?.[`bank_balances.${index}.account_id`] ? 'border-red-500' : ''}>
+                                        <SelectValue placeholder={balance.bank_id ? "Select Account" : "Select Bank First"} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {bankAccounts[balance.bank_id]?.map((account) => (
+                                            <SelectItem key={account.id} value={account.id.toString()}>
+                                                {account.account_number} {account.account_type && `(${account.account_type})`}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                {(clientErrors[`bank_balances.${index}.account_id`] || errors?.[`bank_balances.${index}.account_id`]) && (
+                                    <p className="text-red-500 text-sm mt-1">{clientErrors[`bank_balances.${index}.account_id`] || errors?.[`bank_balances.${index}.account_id`]}</p>
+                                )}
+                            </div>
+                            
+                            <div>
+                                <Label htmlFor={`balance_${index}`}>Balance</Label>
+                                <Input
+                                    id={`balance_${index}`}
+                                    type="number"
+                                    step="0.01"
+                                    value={balance.balance}
+                                    onChange={(e) => updateBankBalance(index, 'balance', e.target.value)}
+                                    placeholder="Balance Amount"
+                                    className={clientErrors[`bank_balances.${index}.balance`] || errors?.[`bank_balances.${index}.balance`] ? 'border-red-500' : ''}
+                                />
+                                {(clientErrors[`bank_balances.${index}.balance`] || errors?.[`bank_balances.${index}.balance`]) && (
+                                    <p className="text-red-500 text-sm mt-1">{clientErrors[`bank_balances.${index}.balance`] || errors?.[`bank_balances.${index}.balance`]}</p>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                ))}
+                
+                <Button
+                    type="button"
+                    variant="outline"
+                    onClick={addBankBalance}
+                    className="w-full"
+                >
+                    + Add Another Bank Balance
+                </Button>
+            </div>
+            
+            <DialogFooter>
+                <DialogClose asChild>
+                    <Button variant="outline" disabled={submitting}>
+                        Cancel
+                    </Button>
+                </DialogClose>
+                <Button onClick={handleSubmit} disabled={submitting}>
+                    {submitting ? 'Saving...' : 'Save Bank Balances'}
+                </Button>
+            </DialogFooter>
+            
+            {/* Add Account Modal */}
+            <Dialog open={showAddAccountModal} onOpenChange={setShowAddAccountModal}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Add New Account</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div>
+                            <Label htmlFor="new_bank">Bank</Label>
+                            <Select
+                                value={newAccount.bank_id}
+                                onValueChange={(value) => setNewAccount({ ...newAccount, bank_id: value })}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Select Bank" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {banks.map((bank) => (
+                                        <SelectItem key={bank.id} value={bank.id.toString()}>
+                                            {bank.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        
+                        <div>
+                            <Label htmlFor="new_account_number">Account Number</Label>
+                            <Input
+                                id="new_account_number"
+                                value={newAccount.account_number}
+                                onChange={(e) => setNewAccount({ ...newAccount, account_number: e.target.value })}
+                                placeholder="Enter account number"
+                            />
+                        </div>
+                        
+                        <div>
+                            <Label htmlFor="new_account_type">Account Type (Optional)</Label>
+                            <Input
+                                id="new_account_type"
+                                value={newAccount.account_type}
+                                onChange={(e) => setNewAccount({ ...newAccount, account_type: e.target.value })}
+                                placeholder="e.g., Savings, Current"
+                            />
+                        </div>
+                    </div>
+                    
+                    <DialogFooter>
+                        <DialogClose asChild>
+                            <Button variant="outline" disabled={addingAccount}>
+                                Cancel
+                            </Button>
+                        </DialogClose>
+                        <Button 
+                            onClick={handleAddAccount} 
+                            disabled={addingAccount || !newAccount.bank_id || !newAccount.account_number}
+                        >
+                            {addingAccount ? 'Adding...' : 'Add Account'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </DialogContent>
+    );
+};
+
 const AddDepositModal = ({ open, setOpen, fd, isEdit, banks, onAddBank }: { open: boolean; setOpen: (v: boolean) => void; fd?: any; isEdit?: boolean, banks: Array<{ id: number, name: string }>, onAddBank: (name: string) => void }) => {
     // Helper to format date string (YYYY-MM-DDTHH:mm:ss...) to YYYY-MM-DD for input[type=date]
     // Format JS Date or string to DD/MM/YYYY
@@ -585,6 +940,7 @@ const FixedDepositsPage = () => {
     const [sortKey, setSortKey] = useState('maturity_date');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
     const [modalOpen, setModalOpen] = useState(false);
+    const [bankBalanceModalOpen, setBankBalanceModalOpen] = useState(false);
     const [editFD, setEditFD] = useState<any>(null);
     const [closeFD, setCloseFD] = useState<any>(null);
     const [matureFD, setMatureFD] = useState<any>(null);
@@ -674,14 +1030,25 @@ const FixedDepositsPage = () => {
     return (
         <div className="p-4">
             {/* Add FD button/modal at the top */}
-            <Dialog open={modalOpen} onOpenChange={setModalOpen}>
-                <DialogTrigger asChild>
-                    <Button className="mb-4" variant="default">
-                        + Add New Deposit
-                    </Button>
-                </DialogTrigger>
-                <AddDepositModal open={modalOpen} setOpen={setModalOpen} banks={banks} onAddBank={handleAddBank} />
-            </Dialog>
+            <div className="mb-4 flex gap-2">
+                <Dialog open={modalOpen} onOpenChange={setModalOpen}>
+                    <DialogTrigger asChild>
+                        <Button variant="default">
+                            + Add New Deposit
+                        </Button>
+                    </DialogTrigger>
+                    <AddDepositModal open={modalOpen} setOpen={setModalOpen} banks={banks} onAddBank={handleAddBank} />
+                </Dialog>
+                
+                <Dialog open={bankBalanceModalOpen} onOpenChange={setBankBalanceModalOpen}>
+                    <DialogTrigger asChild>
+                        <Button variant="outline">
+                            Update Bank Balance
+                        </Button>
+                    </DialogTrigger>
+                    <BankBalanceModal open={bankBalanceModalOpen} setOpen={setBankBalanceModalOpen} banks={banks} />
+                </Dialog>
+            </div>
             {/* Bank summary cards below Add FD */}
             <BankSummaryCards deposits={sortedDeposits} />
             {/* Toggle Switch for Active/Archived below cards */}
