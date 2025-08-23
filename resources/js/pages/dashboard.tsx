@@ -23,9 +23,20 @@ interface FixedDepositData {
     };
 }
 
+interface BankBalanceData {
+    bank_balances: {
+        bank_name: string;
+        account_number: string;
+        balance: number;
+        update_date: string;
+    }[];
+    total_balance: number;
+}
+
 interface DashboardProps {
     equity_data: EquityData;
     fixed_deposit_data: FixedDepositData;
+    bank_balance_data: BankBalanceData;
     available_years: string[];
     current_year: string;
 }
@@ -41,7 +52,7 @@ const breadcrumbs: BreadcrumbItem[] = [
     },
 ];
 
-export default function Dashboard({ equity_data, fixed_deposit_data, available_years, current_year }: DashboardProps) {
+export default function Dashboard({ equity_data, fixed_deposit_data, bank_balance_data, available_years, current_year }: DashboardProps) {
     const [selectedYear, setSelectedYear] = useState(current_year);
     
     // Safety checks for equity_data
@@ -58,6 +69,12 @@ export default function Dashboard({ equity_data, fixed_deposit_data, available_y
         total_principal: fixed_deposit_data?.total_principal || 0,
         total_unrealized_interest: fixed_deposit_data?.total_unrealized_interest || 0,
         bank_wise_data: fixed_deposit_data?.bank_wise_data || {},
+    };
+
+    // Safety checks for bank_balance_data
+    const safeBankBalanceData = {
+        bank_balances: bank_balance_data?.bank_balances || [],
+        total_balance: bank_balance_data?.total_balance || 0,
     };
 
     const handleYearChange = (year: string) => {
@@ -93,17 +110,17 @@ export default function Dashboard({ equity_data, fixed_deposit_data, available_y
                     </select>
                 </div>
                 
-                <div className="grid auto-rows-min gap-4 md:grid-cols-3">
+                <div className="grid auto-rows-min gap-4 md:grid-cols-4">
                     <div className="border-sidebar-border/70 dark:border-sidebar-border relative aspect-video overflow-hidden rounded-xl border bg-blue-50 p-4">
                         <h3 className="text-lg font-semibold text-blue-900 mb-2">Net Worth</h3>
                         <div className="text-sm space-y-1">
                             <div className="flex justify-between">
                                 <span className="text-gray-600">Principal Net:</span>
-                                <span className="font-medium text-blue-700">{formatINR(Math.round(safeFixedDepositData.total_principal + safeEquityData.total_invested))}</span>
+                                <span className="font-medium text-blue-700">{formatINR(Math.round(safeFixedDepositData.total_principal + safeEquityData.total_invested + safeBankBalanceData.total_balance))}</span>
                             </div>
                             <div className="flex justify-between">
                                 <span className="text-gray-600">Unrealised Net:</span>
-                                <span className="font-medium text-green-600">{formatINR(Math.round(safeFixedDepositData.total_principal + safeFixedDepositData.total_unrealized_interest + safeEquityData.total_invested + safeEquityData.unrealized_pl))}</span>
+                                <span className="font-medium text-green-600">{formatINR(Math.round(safeFixedDepositData.total_principal + safeFixedDepositData.total_unrealized_interest + safeEquityData.total_invested + safeEquityData.unrealized_pl + safeBankBalanceData.total_balance))}</span>
                             </div>
                         </div>
                     </div>
@@ -160,6 +177,30 @@ export default function Dashboard({ equity_data, fixed_deposit_data, available_y
                                  <span className="text-gray-600">Dividends:</span>
                                  <span className="font-medium text-purple-600">{formatINR(Math.round(safeEquityData.total_dividends))}</span>
                              </div>
+                        </div>
+                    </div>
+                    <div className="border-sidebar-border/70 dark:border-sidebar-border relative aspect-video overflow-hidden rounded-xl border bg-green-50 p-4">
+                        <h3 className="text-lg font-semibold text-green-900 mb-2">Banks Balance</h3>
+                        <div className="text-sm space-y-1">
+                            <div className="flex justify-between mb-2">
+                                <span className="text-gray-600">Total Balance:</span>
+                                <span className="font-medium text-green-700">{formatINR(Math.round(safeBankBalanceData.total_balance))}</span>
+                            </div>
+                            <div className="border-t pt-2 space-y-1 max-h-32 overflow-y-auto">
+                                {safeBankBalanceData.bank_balances.map((balance, index) => (
+                                    <div key={index} className="flex justify-between text-xs">
+                                        <span className="text-gray-600 truncate" title={`${balance.bank_name} (${balance.account_number})`}>
+                                            {balance.bank_name}:
+                                        </span>
+                                        <span className="font-medium text-green-600">
+                                            {formatINR(Math.round(balance.balance))}
+                                        </span>
+                                    </div>
+                                ))}
+                                {safeBankBalanceData.bank_balances.length === 0 && (
+                                    <div className="text-gray-500 text-center text-xs">No Bank Balances</div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>

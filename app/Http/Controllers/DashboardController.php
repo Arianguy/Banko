@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\StockTransaction;
 use App\Models\FixedDeposit;
+use App\Models\BankBalance;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
@@ -21,6 +22,7 @@ class DashboardController extends Controller
         return Inertia::render('dashboard', [
             'equity_data' => $equityData,
             'fixed_deposit_data' => $fixedDepositData,
+            'bank_balance_data' => $this->getBankBalanceData($selectedYear),
             'current_year' => $selectedYear,
             'available_years' => $this->getAvailableYears()
         ]);
@@ -258,5 +260,49 @@ class DashboardController extends Controller
         }
 
         return $holdings;
+    }
+
+    private function getBankBalanceData($financialYear)
+    {
+        [$startYear, $endYear] = explode('-', $financialYear);
+        
+        // March 31st of the financial year
+        $endDate = Carbon::createFromDate($endYear, 3, 31)->endOfDay();
+        
+        // Get all unique bank-account combinations for the user
+        $bankAccounts = BankBalance::where('user_id', Auth::id())
+            ->select('bank_id', 'account_number')
+            ->distinct()
+            ->get();
+        
+        $bankBalances = [];
+        $totalBalance = 0;
+        
+        foreach ($bankAccounts as $account) {
+            // Get the latest balance on or before March 31st for this bank-account combination
+            $balance = BankBalance::with('bank')
+                ->where('user_id', Auth::id())
+                ->where('bank_id', $account->bank_id)
+                ->where('account_number', $account->account_number)
+                ->where('update_date', '<=', $endDate)
+                ->orderBy('update_date', 'desc')
+                ->orderBy('id', 'desc')
+                ->first();
+            
+            if ($balance) {
+                $bankBalances[] = [
+                    'bank_name' => $balance->bank->name,
+                    'account_number' => $balance->account_number,
+                    'balance' => $balance->balance,
+                    'update_date' => $balance->update_date->format('Y-m-d')
+                ];
+                $totalBalance += $balance->balance;
+            }
+        }
+        
+        return [
+            'bank_balances' => $bankBalances,
+            'total_balance' => $totalBalance
+        ];
     }
 }
