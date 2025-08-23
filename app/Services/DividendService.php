@@ -168,24 +168,37 @@ class DividendService
         $stock = Stock::findOrFail($stockId);
 
         // Get all dividend payments for this stock
+        // Note: We process all dividend payments to ensure stale records are cleaned up
+        // when transaction dates are modified, regardless of how old the dividend is
         $dividendPayments = $stock->dividendPayments()
-            ->where('ex_dividend_date', '>=', Carbon::now()->subYear())
             ->orderBy('ex_dividend_date', 'desc')
             ->get();
+            
+        // Also get all existing user dividend records for this stock to clean up any stale ones
+        $existingUserRecords = UserDividendRecord::where('user_id', $userId)
+            ->where('stock_id', $stockId)
+            ->with('dividendPayment')
+            ->get();
+            
+        // Create a collection of dividend payment IDs that we'll process
+        $processedDividendIds = collect();
 
         $eligibilityData = [];
 
         foreach ($dividendPayments as $dividend) {
+            // Track that we're processing this dividend
+            $processedDividendIds->push($dividend->id);
+            
             // Calculate holdings on ex-dividend date
             $holdingsOnExDate = $this->calculateHoldingsOnDate($userId, $stockId, $dividend->ex_dividend_date);
 
+            // Check if user dividend record already exists
+            $userRecord = UserDividendRecord::where('user_id', $userId)
+                ->where('dividend_payment_id', $dividend->id)
+                ->first();
+
             if ($holdingsOnExDate > 0) {
                 $totalDividendAmount = $holdingsOnExDate * $dividend->dividend_amount;
-
-                // Check if user dividend record already exists
-                $userRecord = UserDividendRecord::where('user_id', $userId)
-                    ->where('dividend_payment_id', $dividend->id)
-                    ->first();
 
                 if (!$userRecord) {
                     // Create new user dividend record
@@ -199,10 +212,19 @@ class DividendService
                         'status' => $dividend->dividend_date <= Carbon::now() ? 'received' : 'qualified',
                     ]);
                 } else {
-                    // Update existing record status if dividend date has passed
+                    // Update existing record with recalculated holdings and amounts
+                    // This is crucial when transaction dates are modified
+                    $updateData = [
+                        'qualifying_shares' => $holdingsOnExDate,
+                        'total_dividend_amount' => $totalDividendAmount,
+                    ];
+                    
+                    // Update status if dividend date has passed
                     if ($dividend->dividend_date <= Carbon::now() && $userRecord->status === 'qualified') {
-                        $userRecord->update(['status' => 'received']);
+                        $updateData['status'] = 'received';
                     }
+                    
+                    $userRecord->update($updateData);
                 }
 
                 $eligibilityData[] = [
@@ -211,6 +233,24 @@ class DividendService
                     'qualifying_shares' => $holdingsOnExDate,
                     'total_amount' => $totalDividendAmount,
                 ];
+            } else {
+                // If user no longer has holdings on ex-dividend date, remove the record
+                if ($userRecord) {
+                    $userRecord->delete();
+                }
+            }
+        }
+        
+        // Clean up any stale user dividend records that weren't processed
+        // This handles cases where dividend payments might have been deleted or are very old
+        foreach ($existingUserRecords as $existingRecord) {
+            if (!$processedDividendIds->contains($existingRecord->dividend_payment_id)) {
+                // This record references a dividend that no longer exists or wasn't processed
+                // Recalculate holdings to confirm it should be removed
+                $holdingsOnExDate = $this->calculateHoldingsOnDate($userId, $stockId, $existingRecord->dividendPayment->ex_dividend_date);
+                if ($holdingsOnExDate == 0) {
+                    $existingRecord->delete();
+                }
             }
         }
 

@@ -820,10 +820,10 @@ class EquityHoldingController extends Controller
     {
         try {
             $stockIds = $request->get('stock_ids', []);
+            $user = Auth::user();
 
             if (empty($stockIds)) {
                 // Update all user's stocks
-                $user = Auth::user();
                 $stocks = Stock::whereHas('transactions', function ($query) use ($user) {
                     $query->where('user_id', $user->id);
                 })->get();
@@ -832,16 +832,29 @@ class EquityHoldingController extends Controller
             }
 
             $updated = 0;
+            $eligibilityRecalculated = 0;
+            
             foreach ($stocks as $stock) {
                 if ($this->dividendService->updateDividendData($stock)) {
                     $updated++;
+                }
+                
+                // Recalculate dividend eligibility for the current user
+                // This ensures that changes in transaction dates are reflected in dividend calculations
+                try {
+                    $this->dividendService->calculateDividendEligibility($user->id, $stock->id);
+                    $eligibilityRecalculated++;
+                } catch (\Exception $e) {
+                    // Log the error but don't fail the entire operation
+                    \Illuminate\Support\Facades\Log::warning("Failed to recalculate dividend eligibility for stock {$stock->symbol}: " . $e->getMessage());
                 }
             }
 
             return response()->json([
                 'success' => true,
-                'message' => "Updated dividend data for {$updated} stocks",
+                'message' => "Updated dividend data for {$updated} stocks and recalculated eligibility for {$eligibilityRecalculated} stocks",
                 'updated_count' => $updated,
+                'eligibility_recalculated' => $eligibilityRecalculated,
             ]);
         } catch (\Exception $e) {
             return response()->json([

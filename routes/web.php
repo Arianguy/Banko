@@ -6,16 +6,15 @@ use App\Http\Controllers\FixedDepositController;
 use App\Http\Controllers\BankController;
 use App\Http\Controllers\PortfolioController;
 use App\Http\Controllers\EquityHoldingController;
+use App\Http\Controllers\DashboardController;
 
 Route::get('/', function () {
     return Inertia::render('welcome');
 })->name('home');
 
 Route::middleware(['auth', 'verified'])->group(function () {
-    Route::get('dashboard', function () {
-        return Inertia::render('dashboard');
-    })->name('dashboard');
-
+    Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    
     Route::get('fixed-deposits', function () {
         return Inertia::render('FixedDeposits/Index');
     })->name('fixed-deposits');
@@ -23,8 +22,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/portfolio-summary', function () {
         return Inertia::render('Portfolio/Summary');
     })->name('portfolio.summary');
-
-    Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('fixed-deposits', [FixedDepositController::class, 'index'])->name('fixed-deposits');
         Route::post('fixed-deposits', [FixedDepositController::class, 'store'])->name('fixed-deposits.store');
         Route::put('fixed-deposits/{id}/mature', [FixedDepositController::class, 'mature'])->name('fixed-deposits.mature');
@@ -52,7 +49,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/equity-holding/update-dividend-data', [EquityHoldingController::class, 'updateDividendData'])->name('equity-holding.update-dividend-data');
         Route::get('/equity-holding/{stockId}/dividend-details', [EquityHoldingController::class, 'getDividendDetails'])->name('equity-holding.dividend-details');
         Route::post('/equity-holding/mark-dividend-received', [EquityHoldingController::class, 'markDividendReceived'])->name('equity-holding.mark-dividend-received');
-    });
 });
 
 require __DIR__ . '/settings.php';
