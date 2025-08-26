@@ -659,7 +659,7 @@ class EquityHoldingController extends Controller
                         $transaction = $buyEntry['transaction'];
                         $remainingQuantity = $buyEntry['remaining'];
 
-                        $daysHeld = now()->diffInDays($transaction->transaction_date);
+                        $daysHeld = $transaction->transaction_date->diffInDays(now());
 
                         // Calculate proportional investment for remaining shares
                         $proportionalInvestment = ($transaction->net_amount / $transaction->quantity) * $remainingQuantity;
