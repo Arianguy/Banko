@@ -3,6 +3,7 @@ import { type BreadcrumbItem } from '@/types';
 import { Head } from '@inertiajs/react';
 import { useState } from 'react';
 import { router } from '@inertiajs/react';
+import AssetAllocationChart from '@/components/AssetAllocationChart';
 
 interface EquityData {
     total_invested: number;
@@ -286,6 +287,17 @@ export default function Dashboard({ equity_data, fixed_deposit_data, bank_balanc
                                      </div>
                                 </div>
                             </div>
+                        </div>
+                        
+                        {/* Asset Allocation Chart */}
+                        <div className="mb-6">
+                            <AssetAllocationChart 
+                                realizedPL={safeEquityData.realized_pl}
+                                totalDividends={safeEquityData.total_dividends}
+                                fixedDepositPrincipal={safeFixedDepositData.total_principal}
+                                bankBalanceTotal={safeBankBalanceData.total_balance}
+                                equityInvested={safeEquityData.total_invested}
+                            />
                         </div>
                         
                         {/* Quick Actions */}

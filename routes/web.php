@@ -16,6 +16,14 @@ Route::get('/', function () {
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard');
     
+    // Debug route to check dashboard data
+    Route::get('debug-dashboard', function () {
+        $controller = new DashboardController();
+        $request = new \Illuminate\Http\Request();
+        $result = $controller->index($request);
+        return response()->json($result->getData());
+    })->name('debug.dashboard');
+    
     Route::get('fixed-deposits', function () {
         return Inertia::render('FixedDeposits/Index');
     })->name('fixed-deposits');
