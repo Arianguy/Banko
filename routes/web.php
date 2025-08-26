@@ -7,6 +7,7 @@ use App\Http\Controllers\BankController;
 use App\Http\Controllers\BankBalanceController;
 use App\Http\Controllers\PortfolioController;
 use App\Http\Controllers\EquityHoldingController;
+use App\Http\Controllers\MutualFundController;
 use App\Http\Controllers\DashboardController;
 
 Route::get('/', function () {
@@ -65,6 +66,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/equity-holding/update-dividend-data', [EquityHoldingController::class, 'updateDividendData'])->name('equity-holding.update-dividend-data');
         Route::get('/equity-holding/{stockId}/dividend-details', [EquityHoldingController::class, 'getDividendDetails'])->name('equity-holding.dividend-details');
         Route::post('/equity-holding/mark-dividend-received', [EquityHoldingController::class, 'markDividendReceived'])->name('equity-holding.mark-dividend-received');
+
+        // Mutual Fund Routes
+        Route::get('/mutual-funds', [MutualFundController::class, 'index'])->name('mutual-funds.index');
+        Route::post('/mutual-funds', [MutualFundController::class, 'store'])->name('mutual-funds.store');
+        Route::get('/mutual-funds/search-funds', [MutualFundController::class, 'searchFunds'])->name('mutual-funds.search-funds');
 });
 
 require __DIR__ . '/settings.php';
