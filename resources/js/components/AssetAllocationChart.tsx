@@ -1,5 +1,5 @@
 import React from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, LabelList } from 'recharts';
 
 interface AssetAllocationData {
     name: string;
@@ -13,35 +13,30 @@ interface AssetAllocationChartProps {
     fixedDepositPrincipal: number;
     bankBalanceTotal: number;
     equityInvested: number;
+    mutualFundInvestment: number;
 }
 
 function formatINR(amount: number) {
     return '₹ ' + Number(Math.round(amount)).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
-const AssetAllocationChart: React.FC<AssetAllocationChartProps> = ({ realizedPL, totalDividends, fixedDepositPrincipal, bankBalanceTotal, equityInvested }) => {
+const AssetAllocationChart: React.FC<AssetAllocationChartProps> = ({ realizedPL, totalDividends, fixedDepositPrincipal, bankBalanceTotal, equityInvested, mutualFundInvestment }) => {
     // Prepare data for the pie chart
     const data: AssetAllocationData[] = [];
     
-    // Combine equity invested with realized profit
-    const totalEquity = equityInvested + realizedPL;
+    // Use only invested amount for equity (excluding realized P&L)
+    const totalEquity = equityInvested;
     
     // Only include positive values in the chart
     if (totalEquity > 0) {
         data.push({
-            name: 'Equity (Invested + Realized)',
+            name: 'Equity (Invested)',
             value: totalEquity,
             color: '#10b981' // green-500
         });
     }
     
-    if (totalDividends > 0) {
-        data.push({
-            name: 'Dividends Received',
-            value: totalDividends,
-            color: '#8b5cf6' // purple-500
-        });
-    }
+    // Dividends removed from chart as requested
     
     if (fixedDepositPrincipal > 0) {
         data.push({
@@ -56,6 +51,14 @@ const AssetAllocationChart: React.FC<AssetAllocationChartProps> = ({ realizedPL,
             name: 'Bank Balances',
             value: bankBalanceTotal,
             color: '#3b82f6' // blue-500
+        });
+    }
+    
+    if (mutualFundInvestment > 0) {
+        data.push({
+            name: 'Mutual Funds',
+            value: mutualFundInvestment,
+            color: '#8b5cf6' // violet-500
         });
     }
     
@@ -111,6 +114,27 @@ const AssetAllocationChart: React.FC<AssetAllocationChartProps> = ({ realizedPL,
             </div>
         );
     };
+
+    const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
+        const RADIAN = Math.PI / 180;
+        const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+        const x = cx + radius * Math.cos(-midAngle * RADIAN);
+        const y = cy + radius * Math.sin(-midAngle * RADIAN);
+
+        return (
+            <text 
+                x={x} 
+                y={y} 
+                fill="white" 
+                textAnchor="middle" 
+                dominantBaseline="central"
+                fontSize="12"
+                fontWeight="bold"
+            >
+                {`${(percent * 100).toFixed(0)}%`}
+            </text>
+        );
+    };
     
     // Add total to each data point for percentage calculation
     const total = data.reduce((sum, item) => sum + item.value, 0);
@@ -126,6 +150,8 @@ const AssetAllocationChart: React.FC<AssetAllocationChartProps> = ({ realizedPL,
                             data={dataWithTotal}
                             cx="50%"
                             cy="50%"
+                            labelLine={false}
+                            label={renderCustomizedLabel}
                             innerRadius={40}
                             outerRadius={80}
                             paddingAngle={2}

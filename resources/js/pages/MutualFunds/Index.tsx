@@ -6,8 +6,47 @@ import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogT
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
 import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
-import { Plus, TrendingUp, TrendingDown, Search } from 'lucide-react';
+import { Plus, TrendingUp, TrendingDown, Search, ChevronDown, ChevronRight } from 'lucide-react';
+
+// Error Boundary Component
+class ErrorBoundary extends React.Component {
+    constructor(props: any) {
+        super(props);
+        this.state = { hasError: false, error: null };
+    }
+
+    static getDerivedStateFromError(error: any) {
+        return { hasError: true, error };
+    }
+
+    componentDidCatch(error: any, errorInfo: any) {
+        console.error('Error caught by boundary:', error, errorInfo);
+    }
+
+    render() {
+        if ((this.state as any).hasError) {
+            return (
+                <div className="p-4 border border-red-300 bg-red-50 rounded-lg">
+                    <h2 className="text-red-800 font-semibold">Something went wrong</h2>
+                    <p className="text-red-600 text-sm mt-2">
+                        Error: {(this.state as any).error?.message || 'Unknown error'}
+                    </p>
+                    <Button 
+                        onClick={() => this.setState({ hasError: false, error: null })}
+                        className="mt-3"
+                        size="sm"
+                    >
+                        Try Again
+                    </Button>
+                </div>
+            );
+        }
+
+        return (this.props as any).children;
+    }
+}
 
 function formatINR(amount: number) {
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(amount);
@@ -69,10 +108,16 @@ interface Props {
 }
 
 function MutualFunds({ holdings, portfolioMetrics }: Props) {
+    // Add error boundary wrapper
+    const MutualFundsContent = () => {
     const [showAddModal, setShowAddModal] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState([]);
-    const [selectedFund, setSelectedFund] = useState(null);
+    const [selectedFund, setSelectedFund] = useState<any>(null);
+    const [isSearching, setIsSearching] = useState(false);
+    const [expandedFunds, setExpandedFunds] = useState<Set<number>>(new Set());
+    const [addUnitsDialogOpen, setAddUnitsDialogOpen] = useState(false);
+    const [selectedFundForAddUnits, setSelectedFundForAddUnits] = useState<any>(null);
     const [formData, setFormData] = useState({
         mutual_fund_id: '',
         transaction_type: 'buy',
@@ -120,48 +165,95 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
         setSearchResults([]);
     };
 
+    const resetForm = () => {
+        setFormData({
+            mutual_fund_id: '',
+            transaction_type: 'buy',
+            units: '',
+            nav: '',
+            amount: '',
+            transaction_date: new Date().toISOString().split('T')[0],
+            folio_number: '',
+            stamp_duty: '0',
+            transaction_charges: '0',
+            gst: '0',
+            net_amount: '',
+            order_id: '',
+            notes: ''
+        });
+        setSelectedFund(null);
+        setSearchQuery('');
+        setSearchResults([]);
+    };
+
+    const toggleFundExpansion = (fundId: number) => {
+        // Ensure fundId is a number to maintain Set consistency
+        const numericFundId = Number(fundId);
+        
+        setExpandedFunds(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(numericFundId)) {
+                newSet.delete(numericFundId);
+            } else {
+                newSet.add(numericFundId);
+            }
+            return newSet;
+        });
+    };
+
+    const handleAddUnits = (fund: any) => {
+        setSelectedFundForAddUnits(fund);
+        setFormData(prev => ({
+            ...prev,
+            mutual_fund_id: fund.mutual_fund_id.toString(),
+            transaction_type: 'buy'
+        }));
+        setSelectedFund({
+            id: fund.mutual_fund_id,
+            scheme_name: fund.scheme_name,
+            fund_house: fund.fund_house,
+            current_nav: fund.current_nav
+        });
+        setAddUnitsDialogOpen(true);
+    };
+
     useEffect(() => {
         const amount = parseFloat(formData.amount) || 0;
         const stampDuty = parseFloat(formData.stamp_duty) || 0;
         const transactionCharges = parseFloat(formData.transaction_charges) || 0;
         const gst = parseFloat(formData.gst) || 0;
         
-        const netAmount = formData.transaction_type === 'buy' || formData.transaction_type === 'sip'
-            ? amount + stampDuty + transactionCharges + gst
-            : amount - transactionCharges - gst;
+        const netAmount = formData.transaction_type === 'sell' 
+            ? amount - stampDuty - transactionCharges - gst
+            : amount + stampDuty + transactionCharges + gst;
         
         setFormData(prev => ({ ...prev, net_amount: netAmount.toFixed(2) }));
     }, [formData.amount, formData.stamp_duty, formData.transaction_charges, formData.gst, formData.transaction_type]);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        
+        // Debug: Log form data before submission
+        console.log('Submitting form data:', formData);
+        
         router.post('/mutual-funds', formData, {
             onSuccess: () => {
-                setShowAddModal(false);
-                setFormData({
-                    mutual_fund_id: '',
-                    transaction_type: 'buy',
-                    units: '',
-                    nav: '',
-                    amount: '',
-                    transaction_date: new Date().toISOString().split('T')[0],
-                    folio_number: '',
-                    stamp_duty: '0',
-                    transaction_charges: '0',
-                    gst: '0',
-                    net_amount: '',
-                    order_id: '',
-                    notes: ''
-                });
-                setSelectedFund(null);
-                setSearchQuery('');
+                console.log('Transaction added successfully');
+                resetForm();
+                setAddUnitsDialogOpen(false);
+            },
+            onError: (errors) => {
+                console.error('Validation errors:', errors);
+            },
+            onFinish: () => {
+                console.log('Request finished');
             }
         });
     };
 
-    return (
-        <div className="p-4">
-            <Head title="Mutual Funds" />
+        return (
+            <div className="p-4">
+                <Head title="Mutual Funds" />
             
             {/* Action buttons at the top */}
             <div className="mb-4 flex items-center justify-between">
@@ -261,6 +353,97 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
                                             required
                                         />
                                     </div>
+                                    
+                                    <div>
+                                        <Label htmlFor="amount">Amount</Label>
+                                        <Input
+                                            id="amount"
+                                            type="number"
+                                            step="0.01"
+                                            value={formData.amount}
+                                            onChange={(e) => setFormData(prev => ({ ...prev, amount: e.target.value }))}
+                                            required
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <Label htmlFor="folio_number">Folio Number</Label>
+                                        <Input
+                                            id="folio_number"
+                                            type="text"
+                                            value={formData.folio_number}
+                                            onChange={(e) => setFormData(prev => ({ ...prev, folio_number: e.target.value }))}
+                                            placeholder="Optional"
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <Label htmlFor="stamp_duty">Stamp Duty</Label>
+                                        <Input
+                                            id="stamp_duty"
+                                            type="number"
+                                            step="0.01"
+                                            value={formData.stamp_duty}
+                                            onChange={(e) => setFormData(prev => ({ ...prev, stamp_duty: e.target.value }))}
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <Label htmlFor="transaction_charges">Transaction Charges</Label>
+                                        <Input
+                                            id="transaction_charges"
+                                            type="number"
+                                            step="0.01"
+                                            value={formData.transaction_charges}
+                                            onChange={(e) => setFormData(prev => ({ ...prev, transaction_charges: e.target.value }))}
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <Label htmlFor="gst">GST</Label>
+                                        <Input
+                                            id="gst"
+                                            type="number"
+                                            step="0.01"
+                                            value={formData.gst}
+                                            onChange={(e) => setFormData(prev => ({ ...prev, gst: e.target.value }))}
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <Label htmlFor="net_amount">Net Amount</Label>
+                                        <Input
+                                            id="net_amount"
+                                            type="number"
+                                            step="0.01"
+                                            value={formData.net_amount}
+                                            onChange={(e) => setFormData(prev => ({ ...prev, net_amount: e.target.value }))}
+                                            required
+                                            readOnly
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <Label htmlFor="order_id">Order ID</Label>
+                                        <Input
+                                            id="order_id"
+                                            type="text"
+                                            value={formData.order_id}
+                                            onChange={(e) => setFormData(prev => ({ ...prev, order_id: e.target.value }))}
+                                            placeholder="Optional"
+                                        />
+                                    </div>
+                                    
+                                    <div className="col-span-2">
+                                        <Label htmlFor="notes">Notes</Label>
+                                        <Input
+                                            id="notes"
+                                            type="text"
+                                            value={formData.notes}
+                                            onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+                                            placeholder="Optional notes"
+                                        />
+                                    </div>
                                 </div>
                                 
                                 <div className="flex justify-end gap-3">
@@ -276,6 +459,107 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
                             </form>
                         </DialogContent>
                     </Dialog>
+                    
+                    {/* Add Units Dialog */}
+                    <Dialog open={addUnitsDialogOpen} onOpenChange={setAddUnitsDialogOpen}>
+                        <DialogContent className="max-w-2xl">
+                            <DialogHeader>
+                                <DialogTitle>Add Units - {selectedFundForAddUnits?.scheme_name}</DialogTitle>
+                            </DialogHeader>
+                            <form onSubmit={handleSubmit} className="space-y-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <Label htmlFor="add_units">Units</Label>
+                                        <Input
+                                            id="add_units"
+                                            type="number"
+                                            step="0.001"
+                                            value={formData.units}
+                                            onChange={(e) => setFormData(prev => ({ ...prev, units: e.target.value }))}
+                                            required
+                                            placeholder="Enter number of units"
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <Label htmlFor="add_nav">NAV</Label>
+                                        <Input
+                                            id="add_nav"
+                                            type="number"
+                                            step="0.01"
+                                            value={formData.nav}
+                                            onChange={(e) => setFormData(prev => ({ ...prev, nav: e.target.value }))}
+                                            required
+                                            placeholder="Net Asset Value"
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <Label htmlFor="add_amount">Amount</Label>
+                                        <Input
+                                            id="add_amount"
+                                            type="number"
+                                            step="0.01"
+                                            value={formData.amount}
+                                            onChange={(e) => setFormData(prev => ({ ...prev, amount: e.target.value }))}
+                                            required
+                                            placeholder="Transaction amount"
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <Label htmlFor="add_transaction_date">Transaction Date</Label>
+                                        <Input
+                                            id="add_transaction_date"
+                                            type="date"
+                                            value={formData.transaction_date}
+                                            onChange={(e) => setFormData(prev => ({ ...prev, transaction_date: e.target.value }))}
+                                            required
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <Label htmlFor="add_folio_number">Folio Number</Label>
+                                        <Input
+                                            id="add_folio_number"
+                                            type="text"
+                                            value={formData.folio_number}
+                                            onChange={(e) => setFormData(prev => ({ ...prev, folio_number: e.target.value }))}
+                                            placeholder="Optional"
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <Label htmlFor="add_net_amount">Net Amount</Label>
+                                        <Input
+                                            id="add_net_amount"
+                                            type="number"
+                                            step="0.01"
+                                            value={formData.net_amount}
+                                            onChange={(e) => setFormData(prev => ({ ...prev, net_amount: e.target.value }))}
+                                            required
+                                            readOnly
+                                        />
+                                    </div>
+                                </div>
+                                
+                                <div className="flex justify-end gap-3">
+                                    <DialogClose asChild>
+                                        <Button type="button" variant="outline" onClick={() => {
+                                            setAddUnitsDialogOpen(false);
+                                            resetForm();
+                                        }}>
+                                            Cancel
+                                        </Button>
+                                    </DialogClose>
+                                    <Button type="submit">
+                                        Add Units
+                                    </Button>
+                                </div>
+                            </form>
+                        </DialogContent>
+                    </Dialog>
+                    
                     <Button variant="outline">
                         <TrendingUp className="mr-2 h-4 w-4" />
                         Sync NAV
@@ -351,47 +635,138 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
                         </div>
                     ) : (
                         <div className="space-y-4">
-                            {holdings.map((fund) => (
-                                <div key={fund.mutual_fund_id} className="border rounded-lg p-4">
-                                    <div className="flex justify-between items-start">
-                                        <div>
-                                            <h3 className="font-semibold">{fund.scheme_name}</h3>
-                                            <p className="text-sm text-muted-foreground">{fund.fund_house}</p>
-                                        </div>
-                                        <div className="text-right">
-                                            <div className="text-lg font-semibold">{formatINR(fund.current_value)}</div>
-                                            <div className={`text-sm ${
-                                                fund.total_pl >= 0 ? 'text-green-600' : 'text-red-600'
-                                            }`}>
-                                                {formatINR(fund.total_pl)} ({formatPercentage(fund.total_pl_percent)})
+                            {holdings.filter(fund => fund && fund.mutual_fund_id).map((fund) => {
+                                const numericFundId = Number(fund.mutual_fund_id);
+                                const isExpanded = expandedFunds.has(numericFundId);
+                                const buyTransactions = (fund.transactions || []).filter((t: any) => t && t.transaction_type && (t.transaction_type === 'buy' || t.transaction_type === 'sip'));
+                                const hasMultipleTransactions = buyTransactions.length > 2;
+                                
+                                return (
+                                    <div key={fund.mutual_fund_id} className="border rounded-lg p-4">
+                                        <div className="flex justify-between items-start">
+                                            <div className="flex-1">
+                                                <h3 className="font-semibold">{fund.scheme_name}</h3>
+                                                <p className="text-sm text-muted-foreground">{fund.fund_house}</p>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <div className="text-right">
+                                                    <div className="text-lg font-semibold">{formatINR(fund.current_value)}</div>
+                                                    <div className={`text-sm ${
+                                                        fund.total_pl >= 0 ? 'text-green-600' : 'text-red-600'
+                                                    }`}>
+                                                        {formatINR(fund.total_pl)} ({formatPercentage(fund.total_pl_percent)})
+                                                    </div>
+                                                </div>
+                                                <Button
+                                                    size="sm"
+                                                    onClick={() => handleAddUnits(fund)}
+                                                    className="ml-2"
+                                                >
+                                                    <Plus className="h-4 w-4 mr-1" />
+                                                    Add Units
+                                                </Button>
                                             </div>
                                         </div>
+                                        
+                                        <div className="grid grid-cols-4 gap-4 mt-4 text-sm">
+                                            <div>
+                                                <span className="text-muted-foreground">Units:</span>
+                                                <div className="font-medium">{fund.total_units.toFixed(3)}</div>
+                                            </div>
+                                            <div>
+                                                <span className="text-muted-foreground">Avg NAV:</span>
+                                                <div className="font-medium">{formatINR(fund.avg_nav)}</div>
+                                            </div>
+                                            <div>
+                                                <span className="text-muted-foreground">Current NAV:</span>
+                                                <div className="font-medium">{formatINR(fund.current_nav)}</div>
+                                            </div>
+                                            <div>
+                                                <span className="text-muted-foreground">Investment:</span>
+                                                <div className="font-medium">{formatINR(fund.total_investment)}</div>
+                                            </div>
+                                        </div>
+                                        
+                                        {hasMultipleTransactions && (
+                                            <div className="mt-4">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => {
+                                                        console.log('Button clicked for fund:', numericFundId);
+                                                        toggleFundExpansion(numericFundId);
+                                                    }}
+                                                    className="flex items-center gap-2"
+                                                >
+                                                    {isExpanded ? (
+                                                        <ChevronDown className="h-4 w-4" />
+                                                    ) : (
+                                                        <ChevronRight className="h-4 w-4" />
+                                                    )}
+                                                    {isExpanded ? 'Hide' : 'Show'} Transaction Details ({buyTransactions.length} purchases)
+                                                </Button>
+                                                
+                                                {isExpanded && (
+                                                    <div className="mt-3 space-y-2">
+                                                        {buyTransactions.filter((transaction: any) => transaction && transaction.id).map((transaction: any) => (
+                                                            <div key={transaction.id} className="bg-gray-50 rounded-lg p-3 text-sm">
+                                                                <div className="flex justify-between items-start">
+                                                                    <div className="flex-1">
+                                                                        <div className="flex items-center gap-2 mb-2">
+                                                                            <Badge variant={(transaction.days_held || 0) > 365 ? 'default' : 'secondary'}>
+                                                                                {(transaction.days_held || 0) > 365 ? 'LTCG' : 'STCG'}
+                                                                            </Badge>
+                                                                            <span className="text-muted-foreground">
+                                                                                {transaction.transaction_date ? new Date(transaction.transaction_date).toLocaleDateString() : 'N/A'}
+                                                                            </span>
+                                                                        </div>
+                                                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                                                            <div>
+                                                                <span className="text-muted-foreground">Units:</span>
+                                                                <div className="font-medium">{Number(transaction.units || 0).toFixed(3)}</div>
+                                                            </div>
+                                                                            <div>
+                                                                                <span className="text-muted-foreground">NAV:</span>
+                                                                                <div className="font-medium">{formatINR(transaction.nav || 0)}</div>
+                                                                            </div>
+                                                                            <div>
+                                                                                <span className="text-muted-foreground">Amount:</span>
+                                                                                <div className="font-medium">{formatINR(transaction.amount || 0)}</div>
+                                                                            </div>
+                                                                            <div>
+                                                                                <span className="text-muted-foreground">Net Amount:</span>
+                                                                                <div className="font-medium">{formatINR(transaction.net_amount || 0)}</div>
+                                                                            </div>
+                                                                        </div>
+                                                                        {transaction.folio_number && (
+                                                                            <div className="mt-2">
+                                                                                <span className="text-muted-foreground">Folio:</span>
+                                                                                <span className="ml-1 font-medium">{transaction.folio_number}</span>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
-                                    <div className="grid grid-cols-4 gap-4 mt-4 text-sm">
-                                        <div>
-                                            <span className="text-muted-foreground">Units:</span>
-                                            <div className="font-medium">{fund.total_units.toFixed(3)}</div>
-                                        </div>
-                                        <div>
-                                            <span className="text-muted-foreground">Avg NAV:</span>
-                                            <div className="font-medium">{formatINR(fund.avg_nav)}</div>
-                                        </div>
-                                        <div>
-                                            <span className="text-muted-foreground">Current NAV:</span>
-                                            <div className="font-medium">{formatINR(fund.current_nav)}</div>
-                                        </div>
-                                        <div>
-                                            <span className="text-muted-foreground">Investment:</span>
-                                            <div className="font-medium">{formatINR(fund.total_investment)}</div>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
                 </CardContent>
             </Card>
-        </div>
+            </div>
+        );
+    };
+
+    return (
+        <ErrorBoundary>
+            <MutualFundsContent />
+        </ErrorBoundary>
     );
 }
 

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\StockTransaction;
 use App\Models\FixedDeposit;
 use App\Models\BankBalance;
+use App\Models\MutualFundTransaction;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
@@ -15,67 +16,29 @@ class DashboardController extends Controller
 {
     public function index(Request $request)
     {
-        $selectedYear = $request->get('year', $this->getCurrentFinancialYear());
-        $equityData = $this->getEquityData($selectedYear);
-        $fixedDepositData = $this->getFixedDepositData($selectedYear);
+        $equityData = $this->getEquityData();
+        $fixedDepositData = $this->getFixedDepositData();
+        $mutualFundData = $this->getMutualFundData();
         
         return Inertia::render('dashboard', [
             'equity_data' => $equityData,
             'fixed_deposit_data' => $fixedDepositData,
-            'bank_balance_data' => $this->getBankBalanceData($selectedYear),
-            'current_year' => $selectedYear,
-            'available_years' => $this->getAvailableYears()
+            'bank_balance_data' => $this->getBankBalanceData(),
+            'mutual_fund_data' => $mutualFundData
         ]);
     }
 
-    private function getCurrentFinancialYear()
+
+
+    private function getEquityData()
     {
-        $now = Carbon::now();
-        $currentYear = $now->year;
-        
-        // If current month is before April, financial year is previous year
-        if ($now->month < 4) {
-            return ($currentYear - 1) . '-' . $currentYear;
-        }
-        
-        return $currentYear . '-' . ($currentYear + 1);
-    }
+        // Always use current date for calculations
+        $calculationDate = Carbon::now();
 
-    private function getAvailableYears()
-    {
-        $transactions = StockTransaction::where('user_id', Auth::id())
-            ->selectRaw('YEAR(transaction_date) as year')
-            ->distinct()
-            ->orderBy('year', 'desc')
-            ->pluck('year');
-
-        $years = [];
-        foreach ($transactions as $year) {
-            // Create financial year format
-            $years[] = $year . '-' . ($year + 1);
-            if ($year > 2020) { // Add previous year as well
-                $years[] = ($year - 1) . '-' . $year;
-            }
-        }
-
-        // Remove duplicates and sort in descending order
-        $uniqueYears = array_unique($years);
-        rsort($uniqueYears);
-        
-        return $uniqueYears;
-    }
-
-    private function getEquityData($financialYear)
-    {
-        [$startYear, $endYear] = explode('-', $financialYear);
-        
-        $startDate = Carbon::createFromDate($startYear, 4, 1)->startOfDay();
-        $endDate = Carbon::createFromDate($endYear, 3, 31)->endOfDay();
-
-        // Get all transactions for the selected financial year
+        // Get all transactions up to the calculation date
         $transactions = StockTransaction::with('stock')
             ->where('user_id', Auth::id())
-            ->whereBetween('transaction_date', [$startDate, $endDate])
+            ->where('transaction_date', '<=', $calculationDate)
             ->get();
 
         $totalInvested = 0;
@@ -95,19 +58,19 @@ class DashboardController extends Controller
         }
 
         // Calculate current holdings and unrealized P&L
-        $currentHoldings = $this->calculateCurrentHoldings(Auth::id(), $endDate);
+        $currentHoldings = $this->calculateCurrentHoldings(Auth::id(), $calculationDate);
         
         foreach ($currentHoldings as $holding) {
             $currentValue += $holding['current_value'];
             $unrealizedPL += $holding['unrealized_gain_loss'];
         }
 
-        // Calculate dividends received in the financial year
+        // Calculate dividends received up to the calculation date
         $dividendRecords = \App\Models\UserDividendRecord::with('dividendPayment')
             ->where('user_id', Auth::id())
             ->where('status', 'received')
-            ->whereHas('dividendPayment', function ($query) use ($startDate, $endDate) {
-                $query->whereBetween('dividend_date', [$startDate, $endDate]);
+            ->whereHas('dividendPayment', function ($query) use ($calculationDate) {
+                $query->where('dividend_date', '<=', $calculationDate);
             })
             ->get();
         
@@ -122,45 +85,30 @@ class DashboardController extends Controller
         ];
     }
 
-    private function getFixedDepositData($financialYear)
+    private function getFixedDepositData()
     {
-        [$startYear, $endYear] = explode('-', $financialYear);
-        
-        $startDate = Carbon::createFromDate($startYear, 4, 1)->startOfDay();
-        $endDate = Carbon::createFromDate($endYear, 3, 31)->endOfDay();
+        // Always use current date for calculations
+        $calculationDate = Carbon::now();
 
-        // Get all fixed deposits that were active during the selected financial year
+        // Get all fixed deposits that were active as of the calculation date
         $fixedDeposits = FixedDeposit::where('user_id', Auth::id())
-            ->where(function ($query) use ($startDate, $endDate) {
-                // FD started before or during the financial year AND
-                // FD matures after or during the financial year
-                $query->where('start_date', '<=', $endDate)
-                      ->where('maturity_date', '>=', $startDate);
+            ->where('start_date', '<=', $calculationDate)
+            ->where(function ($query) use ($calculationDate) {
+                // Either FD hasn't matured yet, or it was closed after the calculation date
+                $query->where('maturity_date', '>=', $calculationDate)
+                      ->orWhere('closed', false);
             })
-            ->where('closed', false) // Only active FDs
             ->get();
 
         $totalPrincipal = $fixedDeposits->sum('principal_amt');
         
-        // Calculate unrealized interest (interest that would be earned if held to maturity)
+        // Calculate unrealized interest based on the calculation date
         $totalUnrealizedInterest = 0;
         $bankWiseData = [];
 
         foreach ($fixedDeposits as $fd) {
-            // Calculate unrealized interest based on current date vs maturity date
-            $currentDate = Carbon::now();
-            $startDate = Carbon::parse($fd->start_date);
-            $maturityDate = Carbon::parse($fd->maturity_date);
-            
-            if ($currentDate->gte($maturityDate)) {
-                // FD has matured, use full interest
-                $unrealizedInterest = $fd->Int_amt;
-            } else {
-                // FD is still active, calculate pro-rated interest
-                $totalDays = $startDate->diffInDays($maturityDate);
-                $elapsedDays = $startDate->diffInDays($currentDate);
-                $unrealizedInterest = ($fd->Int_amt * $elapsedDays) / $totalDays;
-            }
+            // Always use the full interest amount instead of pro-rated calculation
+            $unrealizedInterest = $fd->Int_amt;
             
             $totalUnrealizedInterest += $unrealizedInterest;
             
@@ -262,12 +210,10 @@ class DashboardController extends Controller
         return $holdings;
     }
 
-    private function getBankBalanceData($financialYear)
+    private function getBankBalanceData()
     {
-        [$startYear, $endYear] = explode('-', $financialYear);
-        
-        // March 31st of the financial year
-        $endDate = Carbon::createFromDate($endYear, 3, 31)->endOfDay();
+        // Always use current date for calculations
+        $calculationDate = Carbon::now();
         
         // Get all unique bank-account combinations for the user
         $bankAccounts = BankBalance::where('user_id', Auth::id())
@@ -279,12 +225,12 @@ class DashboardController extends Controller
         $totalBalance = 0;
         
         foreach ($bankAccounts as $account) {
-            // Get the latest balance on or before March 31st for this bank-account combination
+            // Get the latest balance on or before the calculation date for this bank-account combination
             $balance = BankBalance::with('bank')
                 ->where('user_id', Auth::id())
                 ->where('bank_id', $account->bank_id)
                 ->where('account_number', $account->account_number)
-                ->where('update_date', '<=', $endDate)
+                ->where('update_date', '<=', $calculationDate)
                 ->orderBy('update_date', 'desc')
                 ->orderBy('id', 'desc')
                 ->first();
@@ -303,6 +249,64 @@ class DashboardController extends Controller
         return [
             'bank_balances' => $bankBalances,
             'total_balance' => $totalBalance
+        ];
+    }
+
+    private function getMutualFundData()
+    {
+        // Always use current date for calculations
+        $calculationDate = Carbon::now();
+        
+        // Get all mutual fund transactions up to the calculation date
+        $transactions = MutualFundTransaction::with('mutualFund')
+            ->where('user_id', Auth::id())
+            ->where('transaction_date', '<=', $calculationDate)
+            ->get();
+        
+        $totalInvestment = 0;
+        $totalCurrentValue = 0;
+        $fundWiseData = [];
+        
+        // Group transactions by mutual fund
+        $groupedTransactions = $transactions->groupBy('mutual_fund_id');
+        
+        foreach ($groupedTransactions as $mutualFundId => $fundTransactions) {
+            $mutualFund = $fundTransactions->first()->mutualFund;
+            
+            $totalUnits = 0;
+            $fundInvestment = 0;
+            
+            foreach ($fundTransactions as $transaction) {
+                if ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'sip') {
+                    $totalUnits += $transaction->units;
+                    $fundInvestment += $transaction->net_amount;
+                } elseif ($transaction->transaction_type === 'sell') {
+                    $totalUnits -= $transaction->units;
+                    $fundInvestment -= ($transaction->net_amount / $transaction->units) * $transaction->units;
+                }
+            }
+            
+            if ($totalUnits > 0) {
+                $currentValue = $totalUnits * ($mutualFund->current_nav ?? 0);
+                $totalInvestment += $fundInvestment;
+                $totalCurrentValue += $currentValue;
+                
+                $fundWiseData[] = [
+                    'scheme_name' => $mutualFund->scheme_name,
+                    'fund_house' => $mutualFund->fund_house,
+                    'units' => $totalUnits,
+                    'investment' => $fundInvestment,
+                    'current_value' => $currentValue,
+                    'pl' => $currentValue - $fundInvestment
+                ];
+            }
+        }
+        
+        return [
+            'total_investment' => round($totalInvestment, 2),
+            'total_current_value' => round($totalCurrentValue, 2),
+            'total_pl' => round($totalCurrentValue - $totalInvestment, 2),
+            'fund_wise_data' => $fundWiseData
         ];
     }
 }
