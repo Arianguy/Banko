@@ -161,6 +161,45 @@ class MutualFundController extends Controller
             ->with('success', 'Mutual fund transaction added successfully!');
     }
 
+    public function update(Request $request, $id)
+    {
+        $transaction = MutualFundTransaction::where('id', $id)
+            ->where('user_id', Auth::id())
+            ->firstOrFail();
+
+        $validated = $request->validate([
+            'transaction_type' => 'required|in:buy,sell,sip,dividend_reinvestment',
+            'units' => 'required|numeric|min:0.000001',
+            'nav' => 'required|numeric|min:0.01',
+            'amount' => 'required|numeric|min:0.01',
+            'transaction_date' => 'required|date',
+            'folio_number' => 'nullable|string|max:255',
+            'stamp_duty' => 'nullable|numeric|min:0',
+            'transaction_charges' => 'nullable|numeric|min:0',
+            'gst' => 'nullable|numeric|min:0',
+            'net_amount' => 'required|numeric|min:0.01',
+            'order_id' => 'nullable|string|max:255',
+            'notes' => 'nullable|string',
+        ]);
+
+        $transaction->update($validated);
+
+        return redirect()->route('mutual-funds.index')
+            ->with('success', 'Mutual fund transaction updated successfully!');
+    }
+
+    public function destroy($id)
+    {
+        $transaction = MutualFundTransaction::where('id', $id)
+            ->where('user_id', Auth::id())
+            ->firstOrFail();
+
+        $transaction->delete();
+
+        return redirect()->route('mutual-funds.index')
+            ->with('success', 'Mutual fund transaction deleted successfully!');
+    }
+
     public function searchFunds(Request $request)
     {
         $query = $request->get('query', '');

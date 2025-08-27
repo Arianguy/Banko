@@ -70,6 +70,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
         // Mutual Fund Routes
         Route::get('/mutual-funds', [MutualFundController::class, 'index'])->name('mutual-funds.index');
         Route::post('/mutual-funds', [MutualFundController::class, 'store'])->name('mutual-funds.store');
+        Route::put('/mutual-funds/transactions/{id}', [MutualFundController::class, 'update'])->name('mutual-funds.transactions.update');
+        Route::delete('/mutual-funds/transactions/{id}', [MutualFundController::class, 'destroy'])->name('mutual-funds.transactions.destroy');
         Route::get('/mutual-funds/search-funds', [MutualFundController::class, 'searchFunds'])->name('mutual-funds.search-funds');
 });
 

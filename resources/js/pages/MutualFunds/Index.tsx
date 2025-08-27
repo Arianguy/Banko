@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
-import { Plus, TrendingUp, TrendingDown, Search, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, TrendingUp, TrendingDown, Search, ChevronDown, ChevronRight, Edit, Trash2 } from 'lucide-react';
 
 // Error Boundary Component
 class ErrorBoundary extends React.Component {
@@ -118,6 +118,10 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
     const [expandedFunds, setExpandedFunds] = useState<Set<number>>(new Set());
     const [addUnitsDialogOpen, setAddUnitsDialogOpen] = useState(false);
     const [selectedFundForAddUnits, setSelectedFundForAddUnits] = useState<any>(null);
+    const [editTransactionDialogOpen, setEditTransactionDialogOpen] = useState(false);
+    const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
+    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [transactionToDelete, setTransactionToDelete] = useState<any>(null);
     const [formData, setFormData] = useState({
         mutual_fund_id: '',
         transaction_type: 'buy',
@@ -217,6 +221,61 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
         setAddUnitsDialogOpen(true);
     };
 
+    const handleEditTransaction = (transaction: any) => {
+        // Create a copy of the transaction with proper date formatting
+        const transactionCopy = {
+            ...transaction,
+            transaction_date: transaction.transaction_date ? transaction.transaction_date.split('T')[0] : '',
+            units: transaction.units.toString(),
+            nav: transaction.nav.toString(),
+            amount: transaction.amount.toString(),
+            net_amount: transaction.net_amount.toString(),
+            stamp_duty: transaction.stamp_duty?.toString() || '0',
+            transaction_charges: transaction.transaction_charges?.toString() || '0',
+            gst: transaction.gst?.toString() || '0'
+        };
+        setSelectedTransaction(transactionCopy);
+        setEditTransactionDialogOpen(true);
+    };
+
+    const handleDeleteTransaction = (transaction: any) => {
+        setTransactionToDelete(transaction);
+        setDeleteConfirmOpen(true);
+    };
+
+    const confirmDeleteTransaction = () => {
+        if (transactionToDelete) {
+            router.delete(`/mutual-funds/transactions/${transactionToDelete.id}`, {
+                onSuccess: () => {
+                    setDeleteConfirmOpen(false);
+                    setTransactionToDelete(null);
+                    // Refresh the page to reload data
+                    router.reload();
+                },
+                onError: (errors) => {
+                    console.error('Error deleting transaction:', errors);
+                }
+            });
+        }
+    };
+
+    const handleEditSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (selectedTransaction) {
+            router.put(`/mutual-funds/transactions/${selectedTransaction.id}`, selectedTransaction, {
+                onSuccess: () => {
+                    setEditTransactionDialogOpen(false);
+                    setSelectedTransaction(null);
+                    // Refresh the page to reload data
+                    router.reload();
+                },
+                onError: (errors) => {
+                    console.error('Error updating transaction:', errors);
+                }
+            });
+        }
+    };
+
     useEffect(() => {
         const amount = parseFloat(formData.amount) || 0;
         const stampDuty = parseFloat(formData.stamp_duty) || 0;
@@ -229,6 +288,22 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
         
         setFormData(prev => ({ ...prev, net_amount: netAmount.toFixed(2) }));
     }, [formData.amount, formData.stamp_duty, formData.transaction_charges, formData.gst, formData.transaction_type]);
+
+    // Recalculate net_amount for selectedTransaction when editing
+    useEffect(() => {
+        if (selectedTransaction) {
+            const amount = parseFloat(selectedTransaction.amount) || 0;
+            const stampDuty = parseFloat(selectedTransaction.stamp_duty) || 0;
+            const transactionCharges = parseFloat(selectedTransaction.transaction_charges) || 0;
+            const gst = parseFloat(selectedTransaction.gst) || 0;
+            
+            const netAmount = selectedTransaction.transaction_type === 'sell' 
+                ? amount - stampDuty - transactionCharges - gst
+                : amount + stampDuty + transactionCharges + gst;
+            
+            setSelectedTransaction((prev: any) => prev ? ({ ...prev, net_amount: netAmount.toFixed(2) }) : null);
+        }
+    }, [selectedTransaction?.amount, selectedTransaction?.stamp_duty, selectedTransaction?.transaction_charges, selectedTransaction?.gst, selectedTransaction?.transaction_type]);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -639,7 +714,7 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
                                 const numericFundId = Number(fund.mutual_fund_id);
                                 const isExpanded = expandedFunds.has(numericFundId);
                                 const buyTransactions = (fund.transactions || []).filter((t: any) => t && t.transaction_type && (t.transaction_type === 'buy' || t.transaction_type === 'sip'));
-                                const hasMultipleTransactions = buyTransactions.length > 2;
+                                const hasMultipleTransactions = buyTransactions.length >= 1;
                                 
                                 return (
                                     <div key={fund.mutual_fund_id} className="border rounded-lg p-4">
@@ -712,19 +787,26 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
                                                             <div key={transaction.id} className="bg-gray-50 rounded-lg p-3 text-sm">
                                                                 <div className="flex justify-between items-start">
                                                                     <div className="flex-1">
-                                                                        <div className="flex items-center gap-2 mb-2">
-                                                                            <Badge variant={(transaction.days_held || 0) > 365 ? 'default' : 'secondary'}>
-                                                                                {(transaction.days_held || 0) > 365 ? 'LTCG' : 'STCG'}
-                                                                            </Badge>
-                                                                            <span className="text-muted-foreground">
-                                                                                {transaction.transaction_date ? new Date(transaction.transaction_date).toLocaleDateString() : 'N/A'}
-                                                                            </span>
-                                                                        </div>
-                                                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                                                        <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
                                                                             <div>
-                                                                <span className="text-muted-foreground">Units:</span>
-                                                                <div className="font-medium">{Number(transaction.units || 0).toFixed(3)}</div>
-                                                            </div>
+                                                                                <span className="text-muted-foreground">Type/Date:</span>
+                                                                                <div className="flex items-center gap-2 mt-1">
+                                                                                    <Badge className={`text-xs ${
+                                                                                        (transaction.days_held || 0) > 365 
+                                                                                            ? 'bg-green-100 text-green-800 border-green-300' 
+                                                                                            : 'bg-orange-100 text-orange-800 border-orange-300'
+                                                                                    }`}>
+                                                                                        {(transaction.days_held || 0) > 365 ? 'LTCG' : 'STCG'}
+                                                                                    </Badge>
+                                                                                    <span className="text-xs text-muted-foreground">
+                                                                                        {transaction.transaction_date ? new Date(transaction.transaction_date).toLocaleDateString() : 'N/A'}
+                                                                                    </span>
+                                                                                </div>
+                                                                            </div>
+                                                                            <div>
+                                                                                <span className="text-muted-foreground">Units:</span>
+                                                                                <div className="font-medium">{Number(transaction.units || 0).toFixed(3)}</div>
+                                                                            </div>
                                                                             <div>
                                                                                 <span className="text-muted-foreground">NAV:</span>
                                                                                 <div className="font-medium">{formatINR(transaction.nav || 0)}</div>
@@ -736,6 +818,27 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
                                                                             <div>
                                                                                 <span className="text-muted-foreground">Net Amount:</span>
                                                                                 <div className="font-medium">{formatINR(transaction.net_amount || 0)}</div>
+                                                                            </div>
+                                                                            <div>
+                                                                                <span className="text-muted-foreground">Actions:</span>
+                                                                                <div className="flex items-center gap-1 mt-1">
+                                                                                    <Button
+                                                                                        size="sm"
+                                                                                        variant="ghost"
+                                                                                        className="h-6 w-6 p-0 hover:bg-blue-100"
+                                                                                        onClick={() => handleEditTransaction(transaction)}
+                                                                                    >
+                                                                                        <Edit className="h-3 w-3 text-blue-600" />
+                                                                                    </Button>
+                                                                                    <Button
+                                                                                        size="sm"
+                                                                                        variant="ghost"
+                                                                                        className="h-6 w-6 p-0 hover:bg-red-100"
+                                                                                        onClick={() => handleDeleteTransaction(transaction)}
+                                                                                    >
+                                                                                        <Trash2 className="h-3 w-3 text-red-600" />
+                                                                                    </Button>
+                                                                                </div>
                                                                             </div>
                                                                         </div>
                                                                         {transaction.folio_number && (
@@ -759,6 +862,134 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
                     )}
                 </CardContent>
             </Card>
+
+            {/* Edit Transaction Dialog */}
+            <Dialog open={editTransactionDialogOpen} onOpenChange={setEditTransactionDialogOpen}>
+                <DialogContent className="sm:max-w-[425px]">
+                    <DialogHeader>
+                        <DialogTitle>Edit Transaction</DialogTitle>
+                    </DialogHeader>
+                    {selectedTransaction && (
+                        <div className="grid gap-4 py-4">
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="edit-units" className="text-right">Units</Label>
+                                <Input
+                                    id="edit-units"
+                                    type="number"
+                                    step="0.001"
+                                    value={selectedTransaction.units || ''}
+                                    onChange={(e) => setSelectedTransaction({...selectedTransaction, units: e.target.value})}
+                                    className="col-span-3"
+                                />
+                            </div>
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="edit-nav" className="text-right">NAV</Label>
+                                <Input
+                                    id="edit-nav"
+                                    type="number"
+                                    step="0.01"
+                                    value={selectedTransaction.nav || ''}
+                                    onChange={(e) => setSelectedTransaction({...selectedTransaction, nav: e.target.value})}
+                                    className="col-span-3"
+                                />
+                            </div>
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="edit-amount" className="text-right">Amount</Label>
+                                <Input
+                                    id="edit-amount"
+                                    type="number"
+                                    step="0.01"
+                                    value={selectedTransaction.amount || ''}
+                                    onChange={(e) => setSelectedTransaction({...selectedTransaction, amount: e.target.value})}
+                                    className="col-span-3"
+                                />
+                            </div>
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="edit-date" className="text-right">Date</Label>
+                                <Input
+                                    id="edit-date"
+                                    type="date"
+                                    value={selectedTransaction.transaction_date || ''}
+                                    onChange={(e) => setSelectedTransaction({...selectedTransaction, transaction_date: e.target.value})}
+                                    className="col-span-3"
+                                />
+                            </div>
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="edit-stamp-duty" className="text-right">Stamp Duty</Label>
+                                <Input
+                                    id="edit-stamp-duty"
+                                    type="number"
+                                    step="0.01"
+                                    value={selectedTransaction.stamp_duty || '0'}
+                                    onChange={(e) => setSelectedTransaction({...selectedTransaction, stamp_duty: e.target.value})}
+                                    className="col-span-3"
+                                />
+                            </div>
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="edit-transaction-charges" className="text-right">Transaction Charges</Label>
+                                <Input
+                                    id="edit-transaction-charges"
+                                    type="number"
+                                    step="0.01"
+                                    value={selectedTransaction.transaction_charges || '0'}
+                                    onChange={(e) => setSelectedTransaction({...selectedTransaction, transaction_charges: e.target.value})}
+                                    className="col-span-3"
+                                />
+                            </div>
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="edit-gst" className="text-right">GST</Label>
+                                <Input
+                                    id="edit-gst"
+                                    type="number"
+                                    step="0.01"
+                                    value={selectedTransaction.gst || '0'}
+                                    onChange={(e) => setSelectedTransaction({...selectedTransaction, gst: e.target.value})}
+                                    className="col-span-3"
+                                />
+                            </div>
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="edit-net-amount" className="text-right">Net Amount</Label>
+                                <Input
+                                    id="edit-net-amount"
+                                    type="number"
+                                    step="0.01"
+                                    value={selectedTransaction.net_amount || ''}
+                                    readOnly
+                                    className="col-span-3 bg-gray-50"
+                                />
+                            </div>
+                        </div>
+                    )}
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setEditTransactionDialogOpen(false)}>Cancel</Button>
+                        <Button onClick={handleEditSubmit}>Save Changes</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Delete Confirmation Dialog */}
+            <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+                <DialogContent className="sm:max-w-[425px]">
+                    <DialogHeader>
+                        <DialogTitle>Delete Transaction</DialogTitle>
+                    </DialogHeader>
+                    <div className="py-4">
+                        <p>Are you sure you want to delete this transaction? This action cannot be undone.</p>
+                        {transactionToDelete && (
+                            <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+                                <p className="text-sm"><strong>Units:</strong> {Number(transactionToDelete.units || 0).toFixed(3)}</p>
+                                <p className="text-sm"><strong>NAV:</strong> {formatINR(transactionToDelete.nav || 0)}</p>
+                                <p className="text-sm"><strong>Amount:</strong> {formatINR(transactionToDelete.amount || 0)}</p>
+                                <p className="text-sm"><strong>Date:</strong> {transactionToDelete.transaction_date ? new Date(transactionToDelete.transaction_date).toLocaleDateString() : 'N/A'}</p>
+                            </div>
+                        )}
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>Cancel</Button>
+                        <Button variant="destructive" onClick={confirmDeleteTransaction}>Delete</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
             </div>
         );
     };
