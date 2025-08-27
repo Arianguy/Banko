@@ -5,9 +5,10 @@ namespace App\Http\Controllers;
 use App\Models\MutualFund;
 use App\Models\MutualFundTransaction;
 use Illuminate\Http\Request;
-use Inertia\Inertia;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Inertia\Inertia;
 use Carbon\Carbon;
 
 class MutualFundController extends Controller
@@ -214,5 +215,93 @@ class MutualFundController extends Controller
             ->get(['id', 'scheme_code', 'scheme_name', 'fund_house', 'current_nav']);
 
         return response()->json($funds);
+    }
+
+    public function syncNavs(Request $request)
+    {
+        try {
+            $fundIds = $request->input('fund_ids');
+
+            if ($fundIds) {
+                // Update NAVs for specific funds only
+                $command = 'mutual-fund-navs:update';
+                foreach ($fundIds as $fundId) {
+                    Artisan::call($command, ['--fund' => $fundId]);
+                }
+                $output = "Successfully updated NAVs for user's portfolio funds";
+            } else {
+                // Run the mutual fund NAV update command for all funds
+                Artisan::call('mutual-fund-navs:update');
+                $output = Artisan::output();
+            }
+
+            // Parse the output to get success/failure counts (for all funds sync)
+            if (!$fundIds) {
+                preg_match('/Successfully updated: (\d+) funds/', $output, $successMatches);
+                preg_match('/Failed to update: (\d+) funds/', $output, $failMatches);
+
+                $successCount = $successMatches[1] ?? 0;
+                $failCount = $failMatches[1] ?? 0;
+
+                if ($successCount > 0) {
+                    $message = "✅ Successfully updated {$successCount} mutual fund NAVs from AMFI";
+                    if ($failCount > 0) {
+                        $message .= " (❌ {$failCount} failed)";
+                    }
+                } else {
+                    $message = "❌ Failed to update mutual fund NAVs. Please try again later.";
+                }
+            } else {
+                $message = "✅ Successfully updated NAVs for selected mutual funds";
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => $message
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error updating NAVs: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function addFund(Request $request)
+    {
+        $validated = $request->validate([
+            'scheme_name' => 'required|string|max:255',
+            'scheme_code' => 'required|string|max:50|unique:mutual_funds,scheme_code',
+            'fund_house' => 'required|string|max:255',
+            'category' => 'required|string|max:100',
+            'sub_category' => 'required|string|max:100',
+            'current_nav' => 'nullable|numeric|min:0.01',
+        ]);
+
+        try {
+            $mutualFund = MutualFund::create([
+                'scheme_name' => $validated['scheme_name'],
+                'scheme_code' => $validated['scheme_code'],
+                'fund_house' => $validated['fund_house'],
+                'category' => $validated['category'],
+                'sub_category' => $validated['sub_category'],
+                'current_nav' => $validated['current_nav'] ?? null,
+                'nav_date' => $validated['current_nav'] ? now() : null,
+                'is_active' => true,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Mutual fund added successfully!',
+                'fund' => $mutualFund
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error adding mutual fund: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }

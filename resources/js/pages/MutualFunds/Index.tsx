@@ -122,6 +122,18 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
     const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [transactionToDelete, setTransactionToDelete] = useState<any>(null);
+    const [isSyncingNavs, setIsSyncingNavs] = useState(false);
+    const [showAddFundModal, setShowAddFundModal] = useState(false);
+    const [newFundData, setNewFundData] = useState({
+        scheme_name: '',
+        scheme_code: '',
+        fund_house: '',
+        category: '',
+        sub_category: '',
+        current_nav: ''
+    });
+    const [newFundSearchResults, setNewFundSearchResults] = useState([]);
+    const [isSearchingNewFund, setIsSearchingNewFund] = useState(false);
     const [formData, setFormData] = useState({
         mutual_fund_id: '',
         transaction_type: 'buy',
@@ -276,6 +288,105 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
         }
     };
 
+    const syncNavs = async () => {
+        setIsSyncingNavs(true);
+        try {
+            const response = await fetch('/mutual-funds/sync-navs', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+                }
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                // Refresh the page to show updated NAVs
+                router.reload();
+            } else {
+                console.error('Error syncing NAVs:', data.message);
+            }
+        } catch (error) {
+            console.error('Error syncing NAVs:', error);
+        } finally {
+            setIsSyncingNavs(false);
+        }
+    };
+
+    const searchNewFund = async (query: string) => {
+        if (!query.trim()) {
+            setNewFundSearchResults([]);
+            return;
+        }
+
+        setIsSearchingNewFund(true);
+        try {
+            const response = await fetch(`/mutual-funds/search-funds?query=${encodeURIComponent(query)}`);
+            const data = await response.json();
+            setNewFundSearchResults(data);
+        } catch (error) {
+            console.error('Error searching funds for auto-populate:', error);
+        } finally {
+            setIsSearchingNewFund(false);
+        }
+    };
+
+    const handleNewFundSchemeNameChange = (value: string) => {
+        setNewFundData(prev => ({ ...prev, scheme_name: value }));
+        searchNewFund(value);
+    };
+
+    const selectExistingFundForPopulate = (fund: any) => {
+        setNewFundData({
+            scheme_name: fund.scheme_name,
+            scheme_code: fund.scheme_code,
+            fund_house: fund.fund_house,
+            category: '', // These fields are not returned by search API
+            sub_category: '',
+            current_nav: fund.current_nav?.toString() || ''
+        });
+        setNewFundSearchResults([]);
+    };
+
+    const addNewFund = async (e: React.FormEvent) => {
+        e.preventDefault();
+        try {
+            const response = await fetch('/mutual-funds/add-fund', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+                },
+                body: JSON.stringify(newFundData)
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                // Reset form and close modal
+                setNewFundData({
+                    scheme_name: '',
+                    scheme_code: '',
+                    fund_house: '',
+                    category: '',
+                    sub_category: '',
+                    current_nav: ''
+                });
+                setNewFundSearchResults([]);
+                setShowAddFundModal(false);
+                // Refresh search results
+                if (searchQuery) {
+                    searchFunds(searchQuery);
+                }
+            } else {
+                console.error('Error adding fund:', data.message);
+            }
+        } catch (error) {
+            console.error('Error adding fund:', error);
+        }
+    };
+
     useEffect(() => {
         const amount = parseFloat(formData.amount) || 0;
         const stampDuty = parseFloat(formData.stamp_duty) || 0;
@@ -348,15 +459,26 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="col-span-2">
                                         <Label htmlFor="fund-search">Search Mutual Fund</Label>
+                                        <div className="flex gap-2">
+                                            <div className="relative flex-1">
+                                                <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                                                <Input
+                                                    id="fund-search"
+                                                    placeholder="Search by scheme name, code, or fund house..."
+                                                    value={searchQuery}
+                                                    onChange={(e) => handleSearchChange(e.target.value)}
+                                                    className="pl-10"
+                                                />
+                                            </div>
+                                            <Dialog open={showAddFundModal} onOpenChange={setShowAddFundModal}>
+                                                <DialogTrigger asChild>
+                                                    <Button variant="outline" size="icon" className="bg-black text-white hover:bg-gray-800">
+                                                        <Plus className="h-4 w-4" />
+                                                    </Button>
+                                                </DialogTrigger>
+                                            </Dialog>
+                                        </div>
                                         <div className="relative">
-                                            <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                                            <Input
-                                                id="fund-search"
-                                                placeholder="Search by scheme name, code, or fund house..."
-                                                value={searchQuery}
-                                                onChange={(e) => handleSearchChange(e.target.value)}
-                                                className="pl-10"
-                                            />
                                             {searchResults.length > 0 && (
                                                 <div className="absolute z-10 w-full mt-1 bg-white border rounded-md shadow-lg max-h-60 overflow-auto">
                                                     {searchResults.map((fund: any) => (
@@ -635,9 +757,143 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
                         </DialogContent>
                     </Dialog>
                     
-                    <Button variant="outline">
+                    {/* Add Fund Dialog */}
+                    <Dialog open={showAddFundModal} onOpenChange={setShowAddFundModal}>
+                        <DialogContent className="max-w-2xl">
+                            <DialogHeader>
+                                <DialogTitle>Add New Mutual Fund</DialogTitle>
+                            </DialogHeader>
+                            <form onSubmit={addNewFund} className="space-y-4">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="col-span-2">
+                                        <Label htmlFor="scheme_name">Scheme Name</Label>
+                                        <div className="flex gap-2">
+                                            <div className="relative flex-1">
+                                                <Input
+                                                    id="scheme_name"
+                                                    type="text"
+                                                    value={newFundData.scheme_name}
+                                                    onChange={(e) => setNewFundData(prev => ({ ...prev, scheme_name: e.target.value }))}
+                                                    required
+                                                    placeholder="e.g., HDFC Flexi Cap Direct Plan Growth"
+                                                />
+                                                {newFundSearchResults.length > 0 && (
+                                                    <div className="absolute z-10 w-full mt-1 bg-white border rounded-md shadow-lg max-h-60 overflow-auto">
+                                                        <div className="p-2 text-xs text-gray-500 border-b bg-gray-50">
+                                                            💡 Found existing funds - click to auto-populate fields:
+                                                        </div>
+                                                        {newFundSearchResults.map((fund: any) => (
+                                                            <div
+                                                                key={fund.id}
+                                                                className="p-3 hover:bg-blue-50 cursor-pointer border-b last:border-b-0"
+                                                                onClick={() => selectExistingFundForPopulate(fund)}
+                                                            >
+                                                                <div className="font-medium text-blue-600">{fund.scheme_name}</div>
+                                                                <div className="text-sm text-gray-500">
+                                                                    {fund.fund_house} • {fund.scheme_code}
+                                                                    {fund.current_nav && (
+                                                                        <span className="ml-2">NAV: ₹{fund.current_nav}</span>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                onClick={() => searchNewFund(newFundData.scheme_name)}
+                                                disabled={!newFundData.scheme_name.trim() || isSearchingNewFund}
+                                                className="px-3"
+                                            >
+                                                {isSearchingNewFund ? (
+                                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                                                ) : (
+                                                    "Sync"
+                                                )}
+                                            </Button>
+                                        </div>
+                                    </div>
+                                    
+                                    <div>
+                                        <Label htmlFor="scheme_code">Scheme Code</Label>
+                                        <Input
+                                            id="scheme_code"
+                                            type="text"
+                                            value={newFundData.scheme_code}
+                                            onChange={(e) => setNewFundData(prev => ({ ...prev, scheme_code: e.target.value }))}
+                                            required
+                                            placeholder="e.g., 120503"
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <Label htmlFor="fund_house">Fund House</Label>
+                                        <Input
+                                            id="fund_house"
+                                            type="text"
+                                            value={newFundData.fund_house}
+                                            onChange={(e) => setNewFundData(prev => ({ ...prev, fund_house: e.target.value }))}
+                                            required
+                                            placeholder="e.g., HDFC Mutual Fund"
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <Label htmlFor="category">Category</Label>
+                                        <Input
+                                            id="category"
+                                            type="text"
+                                            value={newFundData.category}
+                                            onChange={(e) => setNewFundData(prev => ({ ...prev, category: e.target.value }))}
+                                            required
+                                            placeholder="e.g., Equity"
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <Label htmlFor="sub_category">Sub Category</Label>
+                                        <Input
+                                            id="sub_category"
+                                            type="text"
+                                            value={newFundData.sub_category}
+                                            onChange={(e) => setNewFundData(prev => ({ ...prev, sub_category: e.target.value }))}
+                                            required
+                                            placeholder="e.g., Flexi Cap Fund"
+                                        />
+                                    </div>
+                                    
+                                    <div>
+                                        <Label htmlFor="current_nav">Current NAV</Label>
+                                        <Input
+                                            id="current_nav"
+                                            type="number"
+                                            step="0.0001"
+                                            value={newFundData.current_nav}
+                                            onChange={(e) => setNewFundData(prev => ({ ...prev, current_nav: e.target.value }))}
+                                            placeholder="e.g., 850.25"
+                                        />
+                                    </div>
+                                </div>
+                                
+                                <div className="flex justify-end gap-3">
+                                    <DialogClose asChild>
+                                        <Button type="button" variant="outline">
+                                            Cancel
+                                        </Button>
+                                    </DialogClose>
+                                    <Button type="submit">
+                                        Add Fund
+                                    </Button>
+                                </div>
+                            </form>
+                        </DialogContent>
+                    </Dialog>
+                    
+                    <Button variant="outline" onClick={syncNavs} disabled={isSyncingNavs}>
                         <TrendingUp className="mr-2 h-4 w-4" />
-                        Sync NAV
+                        {isSyncingNavs ? 'Syncing...' : 'Sync NAV'}
                     </Button>
                 </div>
             </div>
@@ -787,7 +1043,7 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
                                                             <div key={transaction.id} className="bg-gray-50 rounded-lg p-3 text-sm">
                                                                 <div className="flex justify-between items-start">
                                                                     <div className="flex-1">
-                                                                        <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+                                                                        <div className="grid grid-cols-2 md:grid-cols-8 gap-2">
                                                                             <div>
                                                                                 <span className="text-muted-foreground">Type/Date:</span>
                                                                                 <div className="flex items-center gap-2 mt-1">
@@ -816,11 +1072,25 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
                                                                                 <div className="font-medium">{formatINR(transaction.amount || 0)}</div>
                                                                             </div>
                                                                             <div>
-                                                                                <span className="text-muted-foreground">Net Amount:</span>
-                                                                                <div className="font-medium">{formatINR(transaction.net_amount || 0)}</div>
-                                                                            </div>
-                                                                            <div>
-                                                                                <span className="text-muted-foreground">Actions:</span>
+                                                                <span className="text-muted-foreground">Net Amount:</span>
+                                                                <div className="font-medium">{formatINR(transaction.net_amount || 0)}</div>
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-muted-foreground">Current NAV:</span>
+                                                                <div className="font-medium">{formatINR(fund.current_nav || 0)}</div>
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-muted-foreground">P/L:</span>
+                                                                <div className={`font-medium ${
+                                                                    ((fund.current_nav || 0) - (transaction.nav || 0)) < 0 
+                                                                        ? 'text-red-600' 
+                                                                        : 'text-green-600'
+                                                                }`}>
+                                                                    {formatINR((fund.current_nav || 0) - (transaction.nav || 0))}
+                                                                </div>
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-muted-foreground">Actions:</span>
                                                                                 <div className="flex items-center gap-1 mt-1">
                                                                                     <Button
                                                                                         size="sm"

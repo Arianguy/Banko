@@ -111,10 +111,25 @@ class MutualFundSeeder extends Seeder
                 'fund_type' => 'equity',
                 'is_active' => true,
             ],
+            [
+                'scheme_code' => 'HDFC-FLEXI-009',
+                'scheme_name' => 'HDFC Flexi Cap Direct Plan Growth',
+                'fund_house' => 'HDFC Mutual Fund',
+                'category' => 'Equity',
+                'sub_category' => 'Flexi Cap',
+                'current_nav' => 2174.26,
+                'nav_date' => Carbon::now()->subDays(1),
+                'expense_ratio' => 0.69,
+                'fund_type' => 'equity',
+                'is_active' => true,
+            ],
         ];
 
         foreach ($mutualFunds as $fund) {
-            MutualFund::create($fund);
+            MutualFund::updateOrCreate(
+                ['scheme_code' => $fund['scheme_code']],
+                $fund
+            );
         }
     }
 }
