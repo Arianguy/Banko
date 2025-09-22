@@ -75,6 +75,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::put('/mutual-funds/transactions/{id}', [MutualFundController::class, 'update'])->name('mutual-funds.transactions.update');
         Route::delete('/mutual-funds/transactions/{id}', [MutualFundController::class, 'destroy'])->name('mutual-funds.transactions.destroy');
         Route::get('/mutual-funds/search-funds', [MutualFundController::class, 'searchFunds'])->name('mutual-funds.search-funds');
+        Route::get('/mutual-funds/sold-history', [MutualFundController::class, 'getSoldHistory'])->name('mutual-funds.sold-history');
 });
 
 require __DIR__ . '/settings.php';

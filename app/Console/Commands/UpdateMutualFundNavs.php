@@ -157,8 +157,56 @@ class UpdateMutualFundNavs extends Command
                      'nav' => 1234.56,
                      'date' => now()->format('Y-m-d')
                  ],
-                 'SBI-BC-001' => [
-                     'nav' => 652.18,
+                 'SBI-BLUE-002' => [
+                     'nav' => 67.89,
+                     'date' => now()->format('Y-m-d')
+                 ],
+                 'ICICI-TECH-003' => [
+                     'nav' => 145.67,
+                     'date' => now()->format('Y-m-d')
+                 ],
+                 'AXIS-SMALL-004' => [
+                     'nav' => 78.34,
+                     'date' => now()->format('Y-m-d')
+                 ],
+                 'UTI-NIFTY-005' => [
+                     'nav' => 234.56,
+                     'date' => now()->format('Y-m-d')
+                 ],
+                 'KOTAK-DEBT-006' => [
+                     'nav' => 12.45,
+                     'date' => now()->format('Y-m-d')
+                 ],
+                 'FRANKLIN-HYBRID-007' => [
+                     'nav' => 89.12,
+                     'date' => now()->format('Y-m-d')
+                 ],
+                 'MIRAE-EMERGING-008' => [
+                     'nav' => 123.78,
+                     'date' => now()->format('Y-m-d')
+                 ],
+                 'HDFC-FLEXI-009' => [
+                     'nav' => 2174.26,
+                     'date' => now()->format('Y-m-d')
+                 ],
+                 'INF760K01FR2' => [
+                     'nav' => 73.58,
+                     'date' => now()->format('Y-m-d')
+                 ],
+                 'HDFC-SMALL-011' => [
+                     'nav' => 165.87,
+                     'date' => now()->format('Y-m-d')
+                 ],
+                 'MOTILAL-VALUE-012' => [
+                     'nav' => 25.091,
+                     'date' => now()->format('Y-m-d')
+                 ],
+                 'PGIM-MIDCAP-013' => [
+                     'nav' => 75.89,
+                     'date' => now()->format('Y-m-d')
+                 ],
+                 'UTI-MOMENTUM-014' => [
+                     'nav' => 21.4592,
                      'date' => now()->format('Y-m-d')
                  ]
              ];

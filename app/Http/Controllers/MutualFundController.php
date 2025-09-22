@@ -42,17 +42,52 @@ class MutualFundController extends Controller
         foreach ($groupedTransactions as $mutualFundId => $fundTransactions) {
             $mutualFund = $fundTransactions->first()->mutualFund;
             
+            // Sort transactions chronologically for FIFO calculation
+            $sortedTransactions = $fundTransactions->sortBy(['transaction_date', 'id']);
+            
+            $buyQueue = collect();
             $totalUnits = 0;
             $totalInvestment = 0;
             $enhancedTransactions = [];
 
-            foreach ($fundTransactions as $transaction) {
+            // Process transactions using FIFO logic
+            foreach ($sortedTransactions as $transaction) {
                 if ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'sip') {
                     $totalUnits += $transaction->units;
                     $totalInvestment += $transaction->net_amount;
-                } elseif ($transaction->transaction_type === 'sell') {
+                    
+                    // Add to buy queue for FIFO tracking
+                    $buyQueue->push([
+                        'units' => $transaction->units,
+                        'remaining' => $transaction->units,
+                        'nav' => $transaction->nav,
+                        'net_amount' => $transaction->net_amount,
+                        'avg_cost_per_unit' => $transaction->net_amount / $transaction->units
+                    ]);
+                } elseif ($transaction->transaction_type === 'sell' || $transaction->transaction_type === 'redemption') {
                     $totalUnits -= $transaction->units;
-                    $totalInvestment -= ($transaction->net_amount / $transaction->units) * $transaction->units;
+                    $remainingToSell = $transaction->units;
+                    $investmentToReduce = 0;
+
+                    // Use FIFO to calculate investment reduction
+                    while ($remainingToSell > 0 && $buyQueue->isNotEmpty()) {
+                        $buyEntry = $buyQueue->first();
+
+                        if ($buyEntry['remaining'] <= $remainingToSell) {
+                            // Consume entire buy entry
+                            $investmentToReduce += $buyEntry['remaining'] * $buyEntry['avg_cost_per_unit'];
+                            $remainingToSell -= $buyEntry['remaining'];
+                            $buyQueue->shift();
+                        } else {
+                            // Partially consume buy entry
+                            $investmentToReduce += $remainingToSell * $buyEntry['avg_cost_per_unit'];
+                            $buyEntry['remaining'] -= $remainingToSell;
+                            $buyQueue[0] = $buyEntry;
+                            $remainingToSell = 0;
+                        }
+                    }
+
+                    $totalInvestment -= $investmentToReduce;
                 }
 
                 $daysHeld = $transaction->transaction_date->diffInDays(now());
@@ -140,7 +175,7 @@ class MutualFundController extends Controller
     {
         $validated = $request->validate([
             'mutual_fund_id' => 'required|exists:mutual_funds,id',
-            'transaction_type' => 'required|in:buy,sell,sip,dividend_reinvestment',
+            'transaction_type' => 'required|in:buy,sell,sip,dividend_reinvestment,redemption',
             'units' => 'required|numeric|min:0.000001',
             'nav' => 'required|numeric|min:0.01',
             'amount' => 'required|numeric|min:0.01',
@@ -156,7 +191,16 @@ class MutualFundController extends Controller
 
         $validated['user_id'] = Auth::id();
 
-        MutualFundTransaction::create($validated);
+        $transaction = MutualFundTransaction::create($validated);
+
+        // Check if this is an AJAX request
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Mutual fund transaction added successfully!',
+                'transaction' => $transaction
+            ]);
+        }
 
         return redirect()->route('mutual-funds.index')
             ->with('success', 'Mutual fund transaction added successfully!');
@@ -266,6 +310,63 @@ class MutualFundController extends Controller
                 'message' => 'Error updating NAVs: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    public function getSoldHistory()
+    {
+        $user = Auth::user();
+
+        // Get all sell/redemption transactions
+        $sellTransactions = MutualFundTransaction::with('mutualFund')
+            ->where('user_id', $user->id)
+            ->whereIn('transaction_type', ['sell', 'redemption'])
+            ->orderBy('transaction_date', 'desc')
+            ->get();
+
+        $soldHistory = [];
+
+        foreach ($sellTransactions as $sellTransaction) {
+            $mutualFund = $sellTransaction->mutualFund;
+            
+            // Get all buy transactions for this fund up to the sell date
+            $buyTransactions = MutualFundTransaction::where('user_id', $user->id)
+                ->where('mutual_fund_id', $sellTransaction->mutual_fund_id)
+                ->whereIn('transaction_type', ['buy', 'sip'])
+                ->where('transaction_date', '<=', $sellTransaction->transaction_date)
+                ->orderBy('transaction_date', 'asc')
+                ->orderBy('id', 'asc')
+                ->get();
+
+            if ($buyTransactions->isNotEmpty()) {
+                // Calculate average buy NAV
+                $totalInvestment = $buyTransactions->sum('net_amount');
+                $totalUnits = $buyTransactions->sum('units');
+                $avgBuyNav = $totalUnits > 0 ? $totalInvestment / $totalUnits : 0;
+
+                // Calculate investment for sold units
+                $soldUnitsInvestment = $avgBuyNav * $sellTransaction->units;
+                
+                // Calculate realized P&L
+                $realizedPL = $sellTransaction->net_amount - $soldUnitsInvestment;
+
+                $soldHistory[] = [
+                    'scheme_name' => $mutualFund->scheme_name,
+                    'fund_house' => $mutualFund->fund_house,
+                    'category' => $mutualFund->category,
+                    'units_sold' => $sellTransaction->units,
+                    'avg_buy_nav' => round($avgBuyNav, 4),
+                    'sell_nav' => $sellTransaction->nav,
+                    'total_investment' => round($soldUnitsInvestment, 2),
+                    'total_proceeds' => $sellTransaction->net_amount,
+                    'realized_pl' => round($realizedPL, 2),
+                    'sell_date' => $sellTransaction->transaction_date->format('Y-m-d'),
+                    'transaction_type' => $sellTransaction->transaction_type,
+                    'folio_number' => $sellTransaction->folio_number,
+                ];
+            }
+        }
+
+        return response()->json($soldHistory);
     }
 
     public function addFund(Request $request)

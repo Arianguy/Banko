@@ -7,8 +7,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
-import { Plus, TrendingUp, TrendingDown, Search, ChevronDown, ChevronRight, Edit, Trash2 } from 'lucide-react';
+import { Plus, TrendingUp, TrendingDown, Search, ChevronDown, ChevronRight, Edit, Trash2, Minus } from 'lucide-react';
 
 // Error Boundary Component
 class ErrorBoundary extends React.Component {
@@ -48,7 +49,10 @@ class ErrorBoundary extends React.Component {
     }
 }
 
-function formatINR(amount: number) {
+function formatINR(amount: number | null) {
+    if (amount === null || amount === undefined || isNaN(amount)) {
+        return '-';
+    }
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(amount);
 }
 
@@ -149,6 +153,24 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
         order_id: '',
         notes: ''
     });
+    const [showSoldHistory, setShowSoldHistory] = useState(false);
+    const [soldHistory, setSoldHistory] = useState<any[]>([]);
+    const [redeemDialogOpen, setRedeemDialogOpen] = useState(false);
+    const [selectedFundForRedeem, setSelectedFundForRedeem] = useState<any>(null);
+    const [redeemFormData, setRedeemFormData] = useState({
+        units: '',
+        redemption_type: 'partial', // 'partial' or 'full'
+        nav: '',
+        amount: '',
+        transaction_date: new Date().toISOString().split('T')[0],
+        folio_number: '',
+        stamp_duty: '0',
+        transaction_charges: '0',
+        gst: '0',
+        net_amount: '',
+        order_id: '',
+        notes: ''
+    });
 
     const searchFunds = async (query: string) => {
         if (query.length < 2) {
@@ -181,6 +203,13 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
         setSearchResults([]);
     };
 
+    // Fetch sold history when showSoldHistory is toggled
+    useEffect(() => {
+        if (showSoldHistory) {
+            fetchSoldHistory();
+        }
+    }, [showSoldHistory]);
+
     const resetForm = () => {
         setFormData({
             mutual_fund_id: '',
@@ -200,6 +229,87 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
         setSelectedFund(null);
         setSearchQuery('');
         setSearchResults([]);
+    };
+
+    const fetchSoldHistory = async () => {
+        try {
+            const response = await fetch('/mutual-funds/sold-history');
+            if (response.ok) {
+                const data = await response.json();
+                setSoldHistory(data);
+            } else {
+                console.error('Failed to fetch sold history');
+            }
+        } catch (error) {
+            console.error('Error fetching sold history:', error);
+        }
+    };
+
+    const handleRedeem = (fund: any) => {
+        setSelectedFundForRedeem(fund);
+        setRedeemFormData(prev => ({
+            ...prev,
+            nav: fund.current_nav.toString(),
+            folio_number: fund.transactions?.[0]?.folio_number || ''
+        }));
+        setRedeemDialogOpen(true);
+    };
+
+    // Calculate amount and net_amount when units or nav changes
+    const calculateAmounts = (units: string, nav: string) => {
+        const unitsNum = parseFloat(units) || 0;
+        const navNum = parseFloat(nav) || 0;
+        const amount = unitsNum * navNum;
+        const stampDuty = parseFloat(redeemFormData.stamp_duty) || 0;
+        const transactionCharges = parseFloat(redeemFormData.transaction_charges) || 0;
+        const gst = parseFloat(redeemFormData.gst) || 0;
+        const netAmount = amount - stampDuty - transactionCharges - gst;
+        
+        return {
+            amount: amount.toFixed(2),
+            net_amount: Math.max(0, netAmount).toFixed(2)
+        };
+    };
+
+    const handleRedeemSubmit = async () => {
+        try {
+            const units = redeemFormData.redemption_type === 'full' ? selectedFundForRedeem.total_units.toString() : redeemFormData.units;
+            const nav = redeemFormData.nav;
+            const calculatedAmounts = calculateAmounts(units, nav);
+            
+            const response = await fetch('/mutual-funds', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+                },
+                body: JSON.stringify({
+                    mutual_fund_id: selectedFundForRedeem.mutual_fund_id,
+                    transaction_type: 'redemption',
+                    units: parseFloat(units),
+                    nav: parseFloat(nav),
+                    amount: parseFloat(calculatedAmounts.amount),
+                    transaction_date: redeemFormData.transaction_date,
+                    folio_number: redeemFormData.folio_number,
+                    stamp_duty: parseFloat(redeemFormData.stamp_duty) || 0,
+                    transaction_charges: parseFloat(redeemFormData.transaction_charges) || 0,
+                    gst: parseFloat(redeemFormData.gst) || 0,
+                    net_amount: parseFloat(calculatedAmounts.net_amount),
+                    order_id: redeemFormData.order_id,
+                    notes: redeemFormData.notes
+                })
+            });
+
+            if (response.ok) {
+                setRedeemDialogOpen(false);
+                window.location.reload(); // Refresh to show updated data
+            } else {
+                alert('Failed to process redemption');
+            }
+        } catch (error) {
+            console.error('Error processing redemption:', error);
+            alert('Error processing redemption');
+        }
     };
 
     const toggleFundExpansion = (fundId: number) => {
@@ -954,6 +1064,65 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
                 </Card>
             </div>
 
+            {/* Show Sold History Checkbox */}
+            <div className="mt-6 flex items-center space-x-2">
+                <Checkbox 
+                    id="show-sold-history" 
+                    checked={showSoldHistory}
+                    onCheckedChange={setShowSoldHistory}
+                />
+                <Label htmlFor="show-sold-history">Show Sold History</Label>
+            </div>
+
+            {/* Sold History Table */}
+            {showSoldHistory && (
+                <Card className="mt-4">
+                    <CardHeader>
+                        <CardTitle>Sold History</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        {soldHistory.length === 0 ? (
+                            <div className="text-center py-8 text-muted-foreground">
+                                No sold transactions found.
+                            </div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full">
+                                    <thead>
+                                        <tr className="border-b">
+                                            <th className="text-left p-2">Fund Name</th>
+                                            <th className="text-left p-2">Units Sold</th>
+                                            <th className="text-left p-2">Avg Buy NAV</th>
+                                            <th className="text-left p-2">Sell NAV</th>
+                                            <th className="text-left p-2">Investment</th>
+                                            <th className="text-left p-2">Proceeds</th>
+                                            <th className="text-left p-2">Realized P&L</th>
+                                            <th className="text-left p-2">Sell Date</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {soldHistory.map((item: any, index: number) => (
+                                            <tr key={index} className="border-b">
+                                                <td className="p-2">{item.scheme_name}</td>
+                                                <td className="p-2">{item.units_sold || '-'}</td>
+                                                <td className="p-2">{formatINR(item.avg_buy_nav)}</td>
+                                                <td className="p-2">{formatINR(item.sell_nav)}</td>
+                                                <td className="p-2">{formatINR(item.total_investment)}</td>
+                                                <td className="p-2">{formatINR(item.total_proceeds)}</td>
+                                                <td className={`p-2 ${(item.realized_pl || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                    {formatINR(item.realized_pl)}
+                                                </td>
+                                                <td className="p-2">{item.sell_date ? new Date(item.sell_date).toLocaleDateString() : '-'}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+            )}
+
             {/* Holdings Table */}
             <Card className="mt-6">
                 <CardHeader>
@@ -995,6 +1164,15 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
                                                 >
                                                     <Plus className="h-4 w-4 mr-1" />
                                                     Add Units
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={() => handleRedeem(fund)}
+                                                    className="ml-2"
+                                                >
+                                                    <Minus className="h-4 w-4 mr-1" />
+                                                    Redeem
                                                 </Button>
                                             </div>
                                         </div>
@@ -1257,6 +1435,123 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>Cancel</Button>
                         <Button variant="destructive" onClick={confirmDeleteTransaction}>Delete</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Redeem Dialog */}
+            <Dialog open={redeemDialogOpen} onOpenChange={setRedeemDialogOpen}>
+                <DialogContent className="sm:max-w-[425px]">
+                    <DialogHeader>
+                        <DialogTitle>Redeem Units</DialogTitle>
+                    </DialogHeader>
+                    {selectedFundForRedeem && (
+                        <div className="space-y-4">
+                            <div className="p-3 bg-gray-50 rounded-lg">
+                                <p className="font-medium">{selectedFundForRedeem.scheme_name}</p>
+                                <p className="text-sm text-muted-foreground">Available Units: {selectedFundForRedeem.total_units?.toFixed(3)}</p>
+                                <p className="text-sm text-muted-foreground">Current NAV: {formatINR(selectedFundForRedeem.current_nav)}</p>
+                            </div>
+                            
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="redemption-type" className="text-right">Type</Label>
+                                <select
+                                    id="redemption-type"
+                                    value={redeemFormData.redemption_type}
+                                    onChange={(e) => setRedeemFormData(prev => ({ ...prev, redemption_type: e.target.value }))}
+                                    className="col-span-3 flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    <option value="partial">Partial Redemption</option>
+                                    <option value="full">Full Redemption</option>
+                                </select>
+                            </div>
+                            
+                            {redeemFormData.redemption_type === 'partial' && (
+                                <div className="grid grid-cols-4 items-center gap-4">
+                                    <Label htmlFor="redeem-units" className="text-right">Units</Label>
+                                    <Input
+                                        id="redeem-units"
+                                        type="number"
+                                        step="0.001"
+                                        value={redeemFormData.units}
+                                        onChange={(e) => {
+                                            const newUnits = e.target.value;
+                                            const calculatedAmounts = calculateAmounts(newUnits, redeemFormData.nav);
+                                            setRedeemFormData(prev => ({ 
+                                                ...prev, 
+                                                units: newUnits,
+                                                amount: calculatedAmounts.amount,
+                                                net_amount: calculatedAmounts.net_amount
+                                            }));
+                                        }}
+                                        className="col-span-3"
+                                        max={selectedFundForRedeem.total_units}
+                                    />
+                                </div>
+                            )}
+                            
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="redeem-nav" className="text-right">NAV</Label>
+                                <Input
+                                    id="redeem-nav"
+                                    type="number"
+                                    step="0.01"
+                                    value={redeemFormData.nav}
+                                    onChange={(e) => {
+                                        const newNav = e.target.value;
+                                        const units = redeemFormData.redemption_type === 'full' ? selectedFundForRedeem.total_units.toString() : redeemFormData.units;
+                                        const calculatedAmounts = calculateAmounts(units, newNav);
+                                        setRedeemFormData(prev => ({ 
+                                            ...prev, 
+                                            nav: newNav,
+                                            amount: calculatedAmounts.amount,
+                                            net_amount: calculatedAmounts.net_amount
+                                        }));
+                                    }}
+                                    className="col-span-3"
+                                />
+                            </div>
+                            
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="redeem-date" className="text-right">Date</Label>
+                                <Input
+                                    id="redeem-date"
+                                    type="date"
+                                    value={redeemFormData.transaction_date}
+                                    onChange={(e) => setRedeemFormData(prev => ({ ...prev, transaction_date: e.target.value }))}
+                                    className="col-span-3"
+                                />
+                            </div>
+                            
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label htmlFor="redeem-folio" className="text-right">Folio Number</Label>
+                                <Input
+                                    id="redeem-folio"
+                                    type="text"
+                                    value={redeemFormData.folio_number}
+                                    onChange={(e) => setRedeemFormData(prev => ({ ...prev, folio_number: e.target.value }))}
+                                    className="col-span-3"
+                                />
+                            </div>
+                            
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label className="text-right">Amount</Label>
+                                <div className="col-span-3 px-3 py-2 bg-gray-50 rounded-md text-sm">
+                                    ₹{redeemFormData.amount || '0.00'}
+                                </div>
+                            </div>
+                            
+                            <div className="grid grid-cols-4 items-center gap-4">
+                                <Label className="text-right">Net Amount</Label>
+                                <div className="col-span-3 px-3 py-2 bg-gray-50 rounded-md text-sm font-medium">
+                                    ₹{redeemFormData.net_amount || '0.00'}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setRedeemDialogOpen(false)}>Cancel</Button>
+                        <Button onClick={handleRedeemSubmit}>Process Redemption</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
