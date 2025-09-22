@@ -328,41 +328,97 @@ class MutualFundController extends Controller
         foreach ($sellTransactions as $sellTransaction) {
             $mutualFund = $sellTransaction->mutualFund;
             
-            // Get all buy transactions for this fund up to the sell date
-            $buyTransactions = MutualFundTransaction::where('user_id', $user->id)
+            // Get all transactions for this fund up to the sell date
+            $allTransactions = MutualFundTransaction::where('user_id', $user->id)
                 ->where('mutual_fund_id', $sellTransaction->mutual_fund_id)
-                ->whereIn('transaction_type', ['buy', 'sip'])
                 ->where('transaction_date', '<=', $sellTransaction->transaction_date)
                 ->orderBy('transaction_date', 'asc')
                 ->orderBy('id', 'asc')
                 ->get();
 
-            if ($buyTransactions->isNotEmpty()) {
-                // Calculate average buy NAV
-                $totalInvestment = $buyTransactions->sum('net_amount');
-                $totalUnits = $buyTransactions->sum('units');
-                $avgBuyNav = $totalUnits > 0 ? $totalInvestment / $totalUnits : 0;
-
-                // Calculate investment for sold units
-                $soldUnitsInvestment = $avgBuyNav * $sellTransaction->units;
+            if ($allTransactions->isNotEmpty()) {
+                // Use FIFO logic to calculate the actual cost of sold units
+                $buyQueue = collect();
+                $soldUnitsInvestment = 0;
+                $soldUnitsCount = 0;
                 
-                // Calculate realized P&L
-                $realizedPL = $sellTransaction->net_amount - $soldUnitsInvestment;
+                // Process all transactions chronologically to build the buy queue
+                foreach ($allTransactions as $transaction) {
+                    if ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'sip') {
+                        // Add to buy queue
+                        $buyQueue->push([
+                            'units' => $transaction->units,
+                            'remaining' => $transaction->units,
+                            'nav' => $transaction->nav,
+                            'net_amount' => $transaction->net_amount,
+                            'avg_cost_per_unit' => $transaction->net_amount / $transaction->units
+                        ]);
+                    } elseif ($transaction->id === $sellTransaction->id) {
+                        // This is our target sell transaction - calculate FIFO cost
+                        $remainingToSell = $transaction->units;
+                        
+                        while ($remainingToSell > 0 && $buyQueue->isNotEmpty()) {
+                            $buyEntry = $buyQueue->first();
 
-                $soldHistory[] = [
-                    'scheme_name' => $mutualFund->scheme_name,
-                    'fund_house' => $mutualFund->fund_house,
-                    'category' => $mutualFund->category,
-                    'units_sold' => $sellTransaction->units,
-                    'avg_buy_nav' => round($avgBuyNav, 4),
-                    'sell_nav' => $sellTransaction->nav,
-                    'total_investment' => round($soldUnitsInvestment, 2),
-                    'total_proceeds' => $sellTransaction->net_amount,
-                    'realized_pl' => round($realizedPL, 2),
-                    'sell_date' => $sellTransaction->transaction_date->format('Y-m-d'),
-                    'transaction_type' => $sellTransaction->transaction_type,
-                    'folio_number' => $sellTransaction->folio_number,
-                ];
+                            if ($buyEntry['remaining'] <= $remainingToSell) {
+                                // Consume entire buy entry
+                                $soldUnitsInvestment += $buyEntry['remaining'] * $buyEntry['avg_cost_per_unit'];
+                                $soldUnitsCount += $buyEntry['remaining'];
+                                $remainingToSell -= $buyEntry['remaining'];
+                                $buyQueue->shift();
+                            } else {
+                                // Partially consume buy entry
+                                $soldUnitsInvestment += $remainingToSell * $buyEntry['avg_cost_per_unit'];
+                                $soldUnitsCount += $remainingToSell;
+                                $buyEntry['remaining'] -= $remainingToSell;
+                                $buyQueue[0] = $buyEntry;
+                                $remainingToSell = 0;
+                            }
+                        }
+                        break; // We found our target transaction
+                    } elseif ($transaction->transaction_type === 'sell' || $transaction->transaction_type === 'redemption') {
+                        // Process other sell transactions that happened before our target
+                        $remainingToSell = $transaction->units;
+                        
+                        while ($remainingToSell > 0 && $buyQueue->isNotEmpty()) {
+                            $buyEntry = $buyQueue->first();
+
+                            if ($buyEntry['remaining'] <= $remainingToSell) {
+                                // Consume entire buy entry
+                                $remainingToSell -= $buyQueue->shift()['remaining'];
+                            } else {
+                                // Partially consume buy entry
+                                $buyEntry['remaining'] -= $remainingToSell;
+                                $buyQueue[0] = $buyEntry;
+                                $remainingToSell = 0;
+                            }
+                        }
+                    }
+                }
+
+                // Only include this sell transaction if we actually sold some units (i.e., there were buy transactions)
+                if ($soldUnitsCount > 0) {
+                    // Calculate average buy NAV for the sold units using FIFO
+                    $avgBuyNav = $soldUnitsInvestment / $soldUnitsCount;
+                    
+                    // Calculate realized P&L
+                    $realizedPL = $sellTransaction->net_amount - $soldUnitsInvestment;
+
+                    $soldHistory[] = [
+                        'scheme_name' => $mutualFund->scheme_name,
+                        'fund_house' => $mutualFund->fund_house,
+                        'category' => $mutualFund->category,
+                        'units_sold' => $sellTransaction->units,
+                        'avg_buy_nav' => round($avgBuyNav, 4),
+                        'sell_nav' => $sellTransaction->nav,
+                        'total_investment' => round($soldUnitsInvestment, 2),
+                        'total_proceeds' => $sellTransaction->net_amount,
+                        'realized_pl' => round($realizedPL, 2),
+                        'sell_date' => $sellTransaction->transaction_date->format('Y-m-d'),
+                        'transaction_type' => $sellTransaction->transaction_type,
+                        'folio_number' => $sellTransaction->folio_number,
+                    ];
+                }
             }
         }
 

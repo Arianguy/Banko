@@ -273,16 +273,51 @@ class DashboardController extends Controller
         foreach ($groupedTransactions as $mutualFundId => $fundTransactions) {
             $mutualFund = $fundTransactions->first()->mutualFund;
             
+            // Sort transactions chronologically for FIFO calculation
+            $sortedTransactions = $fundTransactions->sortBy(['transaction_date', 'id']);
+            
+            $buyQueue = collect();
             $totalUnits = 0;
             $fundInvestment = 0;
             
-            foreach ($fundTransactions as $transaction) {
+            // Process transactions using FIFO logic
+            foreach ($sortedTransactions as $transaction) {
                 if ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'sip') {
                     $totalUnits += $transaction->units;
                     $fundInvestment += $transaction->net_amount;
-                } elseif ($transaction->transaction_type === 'sell') {
+                    
+                    // Add to buy queue for FIFO tracking
+                    $buyQueue->push([
+                        'units' => $transaction->units,
+                        'remaining' => $transaction->units,
+                        'nav' => $transaction->nav,
+                        'net_amount' => $transaction->net_amount,
+                        'avg_cost_per_unit' => $transaction->net_amount / $transaction->units
+                    ]);
+                } elseif ($transaction->transaction_type === 'sell' || $transaction->transaction_type === 'redemption') {
                     $totalUnits -= $transaction->units;
-                    $fundInvestment -= ($transaction->net_amount / $transaction->units) * $transaction->units;
+                    $remainingToSell = $transaction->units;
+                    $investmentToReduce = 0;
+
+                    // Use FIFO to calculate investment reduction
+                    while ($remainingToSell > 0 && $buyQueue->isNotEmpty()) {
+                        $buyEntry = $buyQueue->first();
+
+                        if ($buyEntry['remaining'] <= $remainingToSell) {
+                            // Consume entire buy entry
+                            $investmentToReduce += $buyEntry['remaining'] * $buyEntry['avg_cost_per_unit'];
+                            $remainingToSell -= $buyEntry['remaining'];
+                            $buyQueue->shift();
+                        } else {
+                            // Partially consume buy entry
+                            $investmentToReduce += $remainingToSell * $buyEntry['avg_cost_per_unit'];
+                            $buyEntry['remaining'] -= $remainingToSell;
+                            $buyQueue[0] = $buyEntry;
+                            $remainingToSell = 0;
+                        }
+                    }
+
+                    $fundInvestment -= $investmentToReduce;
                 }
             }
             

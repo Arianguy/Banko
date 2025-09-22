@@ -1177,7 +1177,7 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
                                             </div>
                                         </div>
                                         
-                                        <div className="grid grid-cols-4 gap-4 mt-4 text-sm">
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 text-sm">
                                             <div>
                                                 <span className="text-muted-foreground">Units:</span>
                                                 <div className="font-medium">{fund.total_units.toFixed(3)}</div>
@@ -1221,7 +1221,7 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
                                                             <div key={transaction.id} className="bg-gray-50 rounded-lg p-3 text-sm">
                                                                 <div className="flex justify-between items-start">
                                                                     <div className="flex-1">
-                                                                        <div className="grid grid-cols-2 md:grid-cols-8 gap-2">
+                                                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-2">
                                                                             <div>
                                                                                 <span className="text-muted-foreground">Type/Date:</span>
                                                                                 <div className="flex items-center gap-2 mt-1">
