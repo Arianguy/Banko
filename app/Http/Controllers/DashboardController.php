@@ -47,9 +47,72 @@ class DashboardController extends Controller
         $currentValue = 0;
         $totalDividends = 0;
 
-        // Calculate total invested (buy transactions)
-        $buyTransactions = $transactions->where('transaction_type', 'buy');
-        $totalInvested = $buyTransactions->sum('net_amount');
+        // Calculate total invested using FIFO logic to account for sold shares
+        $stockTransactionsByStock = $transactions->groupBy('stock_id');
+        
+        foreach ($stockTransactionsByStock as $stockId => $stockTransactions) {
+            // Sort transactions chronologically for FIFO calculation
+            $sortedTransactions = $stockTransactions->sortBy(['transaction_date', 'id']);
+            
+            $buyQueue = collect();
+            $stockInvestment = 0;
+            
+            // Process transactions using FIFO logic
+            foreach ($sortedTransactions as $transaction) {
+                if ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'bonus') {
+                    $stockInvestment += $transaction->net_amount;
+                    
+                    // Add to buy queue for FIFO tracking (only for buy transactions, bonus has no cost)
+                    if ($transaction->transaction_type === 'buy') {
+                        $buyQueue->push([
+                            'quantity' => $transaction->quantity,
+                            'remaining' => $transaction->quantity,
+                            'price_per_share' => $transaction->net_amount / $transaction->quantity,
+                            'net_amount' => $transaction->net_amount,
+                            'avg_cost_per_share' => $transaction->net_amount / $transaction->quantity
+                        ]);
+                    } else {
+                        // For bonus shares, add to queue with zero cost
+                        $buyQueue->push([
+                            'quantity' => $transaction->quantity,
+                            'remaining' => $transaction->quantity,
+                            'price_per_share' => 0,
+                            'net_amount' => 0,
+                            'avg_cost_per_share' => 0
+                        ]);
+                    }
+                } elseif ($transaction->transaction_type === 'sell') {
+                    $remainingToSell = $transaction->quantity;
+                    $investmentToReduce = 0;
+                    
+                    // Use FIFO to calculate investment reduction
+                    while ($remainingToSell > 0 && $buyQueue->isNotEmpty()) {
+                        $buyEntry = $buyQueue->first();
+
+                        if ($buyEntry['remaining'] <= $remainingToSell) {
+                            // Consume entire buy entry
+                            $investmentToReduce += $buyEntry['remaining'] * $buyEntry['avg_cost_per_share'];
+                            $remainingToSell -= $buyEntry['remaining'];
+                            $buyQueue->shift();
+                        } else {
+                            // Partially consume buy entry
+                            $investmentToReduce += $remainingToSell * $buyEntry['avg_cost_per_share'];
+                            $buyEntry['remaining'] -= $remainingToSell;
+                            $buyQueue[0] = $buyEntry;
+                            $remainingToSell = 0;
+                        }
+                    }
+
+                    $stockInvestment -= $investmentToReduce;
+                }
+            }
+            
+            // Only add to total if there are remaining shares
+            $totalShares = $buyQueue->sum('remaining');
+            if ($totalShares > 0) {
+                $totalInvested += $stockInvestment;
+            }
+        }
 
         // Calculate realized P&L (sell transactions)
         $sellTransactions = $transactions->where('transaction_type', 'sell');
@@ -169,26 +232,60 @@ class DashboardController extends Controller
         $holdings = [];
 
         foreach ($transactions as $symbol => $stockTransactions) {
-            $totalQuantity = 0;
+            // Sort transactions chronologically for FIFO calculation
+            $sortedTransactions = $stockTransactions->sortBy(['transaction_date', 'id']);
+            
+            $buyQueue = collect();
             $totalInvestment = 0;
+            
+            // Process transactions using FIFO logic
+            foreach ($sortedTransactions as $transaction) {
+                if ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'bonus') {
+                    $totalInvestment += $transaction->net_amount;
+                    
+                    // Add to buy queue for FIFO tracking
+                    if ($transaction->transaction_type === 'buy') {
+                        $buyQueue->push([
+                            'quantity' => $transaction->quantity,
+                            'remaining' => $transaction->quantity,
+                            'avg_cost_per_share' => $transaction->net_amount / $transaction->quantity
+                        ]);
+                    } else {
+                        // For bonus shares, add to queue with zero cost
+                        $buyQueue->push([
+                            'quantity' => $transaction->quantity,
+                            'remaining' => $transaction->quantity,
+                            'avg_cost_per_share' => 0
+                        ]);
+                    }
+                } elseif ($transaction->transaction_type === 'sell') {
+                    $remainingToSell = $transaction->quantity;
+                    $investmentToReduce = 0;
+                    
+                    // Use FIFO to calculate investment reduction
+                    while ($remainingToSell > 0 && $buyQueue->isNotEmpty()) {
+                        $buyEntry = $buyQueue->first();
 
-            $buyTransactions = $stockTransactions->where('transaction_type', 'buy');
-            $sellTransactions = $stockTransactions->where('transaction_type', 'sell');
-            $bonusTransactions = $stockTransactions->where('transaction_type', 'bonus');
+                        if ($buyEntry['remaining'] <= $remainingToSell) {
+                            // Consume entire buy entry
+                            $investmentToReduce += $buyEntry['remaining'] * $buyEntry['avg_cost_per_share'];
+                            $remainingToSell -= $buyEntry['remaining'];
+                            $buyQueue->shift();
+                        } else {
+                            // Partially consume buy entry
+                            $investmentToReduce += $remainingToSell * $buyEntry['avg_cost_per_share'];
+                            $buyEntry['remaining'] -= $remainingToSell;
+                            $buyQueue[0] = $buyEntry;
+                            $remainingToSell = 0;
+                        }
+                    }
 
-            // Calculate net quantity
-            foreach ($buyTransactions as $transaction) {
-                $totalQuantity += $transaction->quantity;
-                $totalInvestment += $transaction->net_amount;
+                    $totalInvestment -= $investmentToReduce;
+                }
             }
-
-            foreach ($bonusTransactions as $transaction) {
-                $totalQuantity += $transaction->quantity;
-            }
-
-            foreach ($sellTransactions as $transaction) {
-                $totalQuantity -= $transaction->quantity;
-            }
+            
+            // Calculate remaining quantity from buy queue
+            $totalQuantity = $buyQueue->sum('remaining');
 
             // Only include if user still holds shares
             if ($totalQuantity > 0) {
