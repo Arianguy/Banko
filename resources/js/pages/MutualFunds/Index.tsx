@@ -1069,7 +1069,7 @@ function MutualFunds({ holdings, portfolioMetrics }: Props) {
                 <Checkbox 
                     id="show-sold-history" 
                     checked={showSoldHistory}
-                    onCheckedChange={setShowSoldHistory}
+                    onCheckedChange={(checked) => setShowSoldHistory(checked === true)}
                 />
                 <Label htmlFor="show-sold-history">Show Sold History</Label>
             </div>

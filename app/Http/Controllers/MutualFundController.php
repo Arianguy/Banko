@@ -408,7 +408,7 @@ class MutualFundController extends Controller
                         'scheme_name' => $mutualFund->scheme_name,
                         'fund_house' => $mutualFund->fund_house,
                         'category' => $mutualFund->category,
-                        'units_sold' => $sellTransaction->units,
+                        'units_sold' => round($sellTransaction->units, 3),
                         'avg_buy_nav' => round($avgBuyNav, 4),
                         'sell_nav' => $sellTransaction->nav,
                         'total_investment' => round($soldUnitsInvestment, 2),
