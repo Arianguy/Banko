@@ -124,7 +124,7 @@ class MutualFundSeeder extends Seeder
                 'is_active' => true,
             ],
             [
-                'scheme_code' => 'INF760K01FR2',
+                'scheme_code' => '118269',
                 'scheme_name' => 'Canara Robeco Large Cap Fund - Direct Plan - Growth',
                 'fund_house' => 'Canara Robeco Mutual Fund',
                 'category' => 'Equity',
@@ -136,7 +136,7 @@ class MutualFundSeeder extends Seeder
                 'is_active' => true,
             ],
             [
-                'scheme_code' => 'HDFC-SMALL-011',
+                'scheme_code' => '130503',
                 'scheme_name' => 'HDFC Small Cap Fund - Direct Plan - Growth',
                 'fund_house' => 'HDFC Asset Management Company Limited',
                 'category' => 'Equity',
@@ -179,7 +179,7 @@ class MutualFundSeeder extends Seeder
             ],
             [
                 'scheme_code' => 'UTI-MOMENTUM-014',
-                'scheme_name' => 'UTI Nifty200 Momentum 30 Index Fund - Direct Plan - Growth',
+                'scheme_name' => 'UTI Nifty 200 Momentum 30 Index Fund - Direct Plan - Growth',
                 'fund_house' => 'UTI Asset Management Company Limited',
                 'category' => 'Equity',
                 'sub_category' => 'Index Fund',

@@ -178,7 +178,7 @@ const AddTransactionModal = ({ open, setOpen, sellData = null }: { open: boolean
                         value={transactionType}
                         onValueChange={(value) => {
                             setTransactionType(value);
-                            if (value === 'bonus') {
+                            if (value === 'bonus' || value === 'split') {
                                 setPricePerStock('0');
                                 setTotalCharges('0');
                                 setNetAmount('0');
@@ -194,6 +194,7 @@ const AddTransactionModal = ({ open, setOpen, sellData = null }: { open: boolean
                             <SelectItem value="buy">Buy</SelectItem>
                             <SelectItem value="sell">Sell</SelectItem>
                             <SelectItem value="bonus">Bonus</SelectItem>
+                            <SelectItem value="split">Split</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>
@@ -316,12 +317,13 @@ const AddTransactionModal = ({ open, setOpen, sellData = null }: { open: boolean
                             }}
                             type="number"
                             step="0.01"
-                            placeholder={transactionType === 'bonus' ? '0 (Free bonus shares)' : '1631.10'}
-                            disabled={submitting || transactionType === 'bonus'}
+                            placeholder={transactionType === 'bonus' ? '0 (Free bonus shares)' : transactionType === 'split' ? '0 (Stock split)' : '1631.10'}
+                            disabled={submitting || transactionType === 'bonus' || transactionType === 'split'}
                             required
-                            readOnly={transactionType === 'bonus'}
+                            readOnly={transactionType === 'bonus' || transactionType === 'split'}
                         />
                         {transactionType === 'bonus' && <div className="mt-1 text-xs text-blue-500">💡 Bonus shares are free (₹0)</div>}
+                        {transactionType === 'split' && <div className="mt-1 text-xs text-blue-500">💡 Stock split shares are free (₹0)</div>}
                         {errors?.price_per_stock && <div className="mt-1 text-xs text-red-500">{errors.price_per_stock}</div>}
                     </div>
                     <div>
@@ -356,13 +358,14 @@ const AddTransactionModal = ({ open, setOpen, sellData = null }: { open: boolean
                             type="number"
                             step="0.01"
                             placeholder={
-                                transactionType === 'bonus' ? '0 (No charges)' : transactionType === 'sell' ? '25.50 (STT + brokerage)' : '168.74'
+                                transactionType === 'bonus' ? '0 (No charges)' : transactionType === 'split' ? '0 (No charges)' : transactionType === 'sell' ? '25.50 (STT + brokerage)' : '168.74'
                             }
-                            disabled={submitting || transactionType === 'bonus'}
+                            disabled={submitting || transactionType === 'bonus' || transactionType === 'split'}
                             required
-                            readOnly={transactionType === 'bonus'}
+                            readOnly={transactionType === 'bonus' || transactionType === 'split'}
                         />
                         {transactionType === 'bonus' && <div className="mt-1 text-xs text-blue-500">💡 No charges for bonus shares</div>}
+                        {transactionType === 'split' && <div className="mt-1 text-xs text-blue-500">💡 No charges for stock split</div>}
                         {transactionType === 'sell' && (
                             <div className="mt-1 text-xs text-orange-500">💡 Includes STT, brokerage, and transaction charges</div>
                         )}
@@ -378,12 +381,13 @@ const AddTransactionModal = ({ open, setOpen, sellData = null }: { open: boolean
                             onChange={(e) => setNetAmount(e.target.value)}
                             type="number"
                             step="0.01"
-                            placeholder={transactionType === 'bonus' ? '0 (Free)' : transactionType === 'sell' ? '162500 (after charges)' : '163278'}
-                            disabled={submitting || transactionType === 'bonus'}
+                            placeholder={transactionType === 'bonus' ? '0 (Free)' : transactionType === 'split' ? '0 (Free)' : transactionType === 'sell' ? '162500 (after charges)' : '163278'}
+                            disabled={submitting || transactionType === 'bonus' || transactionType === 'split'}
                             required
-                            readOnly={transactionType === 'bonus'}
+                            readOnly={transactionType === 'bonus' || transactionType === 'split'}
                         />
                         {transactionType === 'bonus' && <div className="mt-1 text-xs text-blue-500">💡 Total amount is ₹0 for bonus shares</div>}
+                        {transactionType === 'split' && <div className="mt-1 text-xs text-blue-500">💡 Total amount is ₹0 for stock split</div>}
                         {transactionType === 'sell' && (
                             <div className="mt-1 text-xs text-green-500">💡 Amount you receive in your account after all charges</div>
                         )}
@@ -513,7 +517,7 @@ const EditTransactionModal = ({ open, setOpen, transaction }: { open: boolean; s
                         value={transactionType}
                         onValueChange={(value) => {
                             setTransactionType(value);
-                            if (value === 'bonus') {
+                            if (value === 'bonus' || value === 'split') {
                                 setPricePerStock('0');
                                 setTotalCharges('0');
                                 setNetAmount('0');
@@ -529,6 +533,7 @@ const EditTransactionModal = ({ open, setOpen, transaction }: { open: boolean; s
                             <SelectItem value="buy">Buy</SelectItem>
                             <SelectItem value="sell">Sell</SelectItem>
                             <SelectItem value="bonus">Bonus</SelectItem>
+                            <SelectItem value="split">Split</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>
@@ -564,12 +569,13 @@ const EditTransactionModal = ({ open, setOpen, transaction }: { open: boolean; s
                             }}
                             type="number"
                             step="0.01"
-                            placeholder={transactionType === 'bonus' ? '0 (Free bonus shares)' : '1631.10'}
-                            disabled={submitting || transactionType === 'bonus'}
+                            placeholder={transactionType === 'bonus' ? '0 (Free bonus shares)' : transactionType === 'split' ? '0 (Stock split)' : '1631.10'}
+                            disabled={submitting || transactionType === 'bonus' || transactionType === 'split'}
                             required
-                            readOnly={transactionType === 'bonus'}
+                            readOnly={transactionType === 'bonus' || transactionType === 'split'}
                         />
                         {transactionType === 'bonus' && <div className="mt-1 text-xs text-blue-500">💡 Bonus shares are free (₹0)</div>}
+                        {transactionType === 'split' && <div className="mt-1 text-xs text-blue-500">💡 Stock split shares are free (₹0)</div>}
                         {errors?.price_per_stock && <div className="mt-1 text-xs text-red-500">{errors.price_per_stock}</div>}
                     </div>
                     <div>
@@ -603,12 +609,13 @@ const EditTransactionModal = ({ open, setOpen, transaction }: { open: boolean; s
                             }}
                             type="number"
                             step="0.01"
-                            placeholder={transactionType === 'bonus' ? '0 (No charges)' : '168.74'}
-                            disabled={submitting || transactionType === 'bonus'}
+                            placeholder={transactionType === 'bonus' ? '0 (No charges)' : transactionType === 'split' ? '0 (No charges)' : '168.74'}
+                            disabled={submitting || transactionType === 'bonus' || transactionType === 'split'}
                             required
-                            readOnly={transactionType === 'bonus'}
+                            readOnly={transactionType === 'bonus' || transactionType === 'split'}
                         />
                         {transactionType === 'bonus' && <div className="mt-1 text-xs text-blue-500">💡 No charges for bonus shares</div>}
+                        {transactionType === 'split' && <div className="mt-1 text-xs text-blue-500">💡 No charges for stock split</div>}
                         {errors?.total_charges && <div className="mt-1 text-xs text-red-500">{errors.total_charges}</div>}
                     </div>
                     <div>
@@ -618,12 +625,13 @@ const EditTransactionModal = ({ open, setOpen, transaction }: { open: boolean; s
                             onChange={(e) => setNetAmount(e.target.value)}
                             type="number"
                             step="0.01"
-                            placeholder={transactionType === 'bonus' ? '0 (Free)' : '163278'}
-                            disabled={submitting || transactionType === 'bonus'}
+                            placeholder={transactionType === 'bonus' ? '0 (Free)' : transactionType === 'split' ? '0 (Free)' : '163278'}
+                            disabled={submitting || transactionType === 'bonus' || transactionType === 'split'}
                             required
-                            readOnly={transactionType === 'bonus'}
+                            readOnly={transactionType === 'bonus' || transactionType === 'split'}
                         />
                         {transactionType === 'bonus' && <div className="mt-1 text-xs text-blue-500">💡 Total amount is ₹0 for bonus shares</div>}
+                        {transactionType === 'split' && <div className="mt-1 text-xs text-blue-500">💡 Total amount is ₹0 for stock split</div>}
                         {errors?.net_amount && <div className="mt-1 text-xs text-red-500">{errors.net_amount}</div>}
                     </div>
                 </div>

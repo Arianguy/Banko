@@ -46,7 +46,7 @@ class EquityHoldingController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'transaction_type' => 'required|string|in:buy,bonus,sell',
+            'transaction_type' => 'required|string|in:buy,bonus,sell,split',
             'stock_name' => 'required|string',
             'exchange' => 'required|string|in:NSE,BSE',
             'date' => 'required|date',
@@ -74,6 +74,21 @@ class EquityHoldingController extends Controller
                     'quantity' => "Cannot sell {$validated['quantity']} shares. You only own {$currentHolding} shares."
                 ])->withInput();
             }
+        }
+
+        // Additional validation for split transactions
+        if ($validated['transaction_type'] === 'split') {
+            $currentHolding = $this->calculateCurrentHolding(Auth::id(), $stock->id);
+            if ($currentHolding <= 0) {
+                return redirect()->back()->withErrors([
+                    'stock_name' => "Cannot record split for {$stock->symbol}. You don't own any shares of this stock."
+                ])->withInput();
+            }
+            
+            // For splits, price should be 0 and no charges
+            $validated['price_per_stock'] = 0;
+            $validated['total_charges'] = 0;
+            $validated['net_amount'] = 0;
         }
 
         // Calculate amounts
@@ -104,7 +119,11 @@ class EquityHoldingController extends Controller
             'notes' => $validated['notes'],
         ]);
 
-        $action = $validated['transaction_type'] === 'sell' ? 'sold' : 'added';
+        $action = match($validated['transaction_type']) {
+            'sell' => 'sold',
+            'split' => 'recorded split for',
+            default => 'added'
+        };
         return redirect()->route('equity-holding.index')->with('success', "Successfully {$action} {$validated['quantity']} shares of {$stock->symbol}!");
     }
 
@@ -187,7 +206,7 @@ class EquityHoldingController extends Controller
 
             // Process transactions using FIFO
             foreach ($sortedTransactions as $transaction) {
-                if ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'bonus') {
+                if ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'bonus' || $transaction->transaction_type === 'split') {
                     $buyQueue->push([
                         'quantity' => $transaction->quantity,
                         'remaining' => $transaction->quantity
@@ -255,7 +274,7 @@ class EquityHoldingController extends Controller
                     $realizedGainLoss = $this->calculateRealizedGainLoss($user->id, $transaction);
                     $totalProceeds += $transaction->net_amount;
                     $totalRealizedPL += $realizedGainLoss;
-                } elseif ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'bonus') {
+                } elseif ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'bonus' || $transaction->transaction_type === 'split') {
                     $totalInvestment += $transaction->net_amount;
                 }
 
@@ -510,7 +529,7 @@ class EquityHoldingController extends Controller
     public function updateTransaction(Request $request, $transactionId)
     {
         $validated = $request->validate([
-            'transaction_type' => 'required|string|in:buy,bonus,sell',
+            'transaction_type' => 'required|string|in:buy,bonus,sell,split',
             'date' => 'required|date',
             'quantity' => 'required|integer|min:1',
             'price_per_stock' => 'required|numeric|min:0',
@@ -522,6 +541,13 @@ class EquityHoldingController extends Controller
 
         $transaction = StockTransaction::where('user_id', Auth::id())
             ->findOrFail($transactionId);
+
+        // Special handling for split transactions
+        if ($validated['transaction_type'] === 'split') {
+            $validated['price_per_stock'] = 0;
+            $validated['total_charges'] = 0;
+            $validated['net_amount'] = 0;
+        }
 
         // Calculate amounts
         $totalAmount = $validated['quantity'] * $validated['price_per_stock'];
@@ -604,6 +630,7 @@ class EquityHoldingController extends Controller
             $buyTransactions = $stockTransactions->where('transaction_type', 'buy');
             $sellTransactions = $stockTransactions->where('transaction_type', 'sell');
             $bonusTransactions = $stockTransactions->where('transaction_type', 'bonus');
+            $splitTransactions = $stockTransactions->where('transaction_type', 'split');
 
             // Get the stock record for this symbol with the most recent price update
             $representativeStock = Stock::where('symbol', $symbol)
@@ -619,7 +646,7 @@ class EquityHoldingController extends Controller
 
             // Process all transactions chronologically
             foreach ($allTransactionsSorted as $transaction) {
-                if ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'bonus') {
+                if ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'bonus' || $transaction->transaction_type === 'split') {
                     // Add to buy queue
                     $buyQueue->push([
                         'transaction' => $transaction,
@@ -666,6 +693,11 @@ class EquityHoldingController extends Controller
             foreach ($bonusTransactions as $transaction) {
                 $totalQuantity += $transaction->quantity;
                 // Bonus shares don't add to investment cost
+            }
+
+            foreach ($splitTransactions as $transaction) {
+                $totalQuantity += $transaction->quantity;
+                // Split shares don't add to investment cost
             }
 
             foreach ($sellTransactions as $transaction) {

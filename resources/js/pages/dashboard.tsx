@@ -216,21 +216,9 @@ export default function Dashboard({ equity_data, fixed_deposit_data, bank_balanc
                                     {formatINR(Math.round(safeMutualFundData.total_pl))}
                                 </span>
                             </div>
-                            <div className="border-t pt-1 mt-1 space-y-1">
-                                {safeMutualFundData.fund_wise_data.map((fund, index) => (
-                                    <div key={index} className="flex justify-between text-xs">
-                                        <span className="text-gray-600 truncate" title={fund.scheme_name}>
-                                            {fund.fund_house}:
-                                        </span>
-                                        <span className="font-medium text-purple-600">
-                                            {formatINR(Math.round(fund.current_value))}
-                                        </span>
-                                    </div>
-                                ))}
-                                {safeMutualFundData.fund_wise_data.length === 0 && (
-                                    <div className="text-gray-500 text-center text-xs">No Mutual Funds</div>
-                                )}
-                            </div>
+                            {safeMutualFundData.fund_wise_data.length === 0 && (
+                                <div className="text-gray-500 text-center text-xs mt-2">No Mutual Funds</div>
+                            )}
                         </div>
                     </div>
                 </div>

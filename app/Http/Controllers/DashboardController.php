@@ -59,10 +59,10 @@ class DashboardController extends Controller
             
             // Process transactions using FIFO logic
             foreach ($sortedTransactions as $transaction) {
-                if ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'bonus') {
+                if ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'bonus' || $transaction->transaction_type === 'split') {
                     $stockInvestment += $transaction->net_amount;
                     
-                    // Add to buy queue for FIFO tracking (only for buy transactions, bonus has no cost)
+                    // Add to buy queue for FIFO tracking (only for buy transactions, bonus and split have no cost)
                     if ($transaction->transaction_type === 'buy') {
                         $buyQueue->push([
                             'quantity' => $transaction->quantity,
@@ -72,7 +72,7 @@ class DashboardController extends Controller
                             'avg_cost_per_share' => $transaction->net_amount / $transaction->quantity
                         ]);
                     } else {
-                        // For bonus shares, add to queue with zero cost
+                        // For bonus and split shares, add to queue with zero cost
                         $buyQueue->push([
                             'quantity' => $transaction->quantity,
                             'remaining' => $transaction->quantity,
@@ -294,7 +294,7 @@ class DashboardController extends Controller
             
             // Process transactions using FIFO logic
             foreach ($sortedTransactions as $transaction) {
-                if ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'bonus') {
+                if ($transaction->transaction_type === 'buy' || $transaction->transaction_type === 'bonus' || $transaction->transaction_type === 'split') {
                     $totalInvestment += $transaction->net_amount;
                     
                     // Add to buy queue for FIFO tracking
@@ -305,7 +305,7 @@ class DashboardController extends Controller
                             'avg_cost_per_share' => $transaction->net_amount / $transaction->quantity
                         ]);
                     } else {
-                        // For bonus shares, add to queue with zero cost
+                        // For bonus and split shares, add to queue with zero cost
                         $buyQueue->push([
                             'quantity' => $transaction->quantity,
                             'remaining' => $transaction->quantity,
