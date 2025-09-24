@@ -291,10 +291,10 @@ class EquityHoldingController extends Controller
 
     private function calculateRealizedGainLoss($userId, $sellTransaction)
     {
-        // Get all buy transactions for this stock up to the sell date
+        // Get all buy/bonus transactions for this stock up to the sell date
         $buyTransactions = StockTransaction::where('user_id', $userId)
             ->where('stock_id', $sellTransaction->stock_id)
-            ->where('transaction_type', 'buy')
+            ->whereIn('transaction_type', ['buy', 'bonus'])
             ->where('transaction_date', '<=', $sellTransaction->transaction_date)
             ->orderBy('transaction_date', 'asc')
             ->orderBy('id', 'asc')
@@ -304,15 +304,73 @@ class EquityHoldingController extends Controller
             return 0;
         }
 
-        // Calculate average buy price
-        $totalInvestment = $buyTransactions->sum('net_amount');
-        $totalQuantity = $buyTransactions->sum('quantity');
-        $avgBuyPrice = $totalQuantity > 0 ? $totalInvestment / $totalQuantity : 0;
+        // Build buy queue for FIFO calculation
+        $buyQueue = collect();
+        foreach ($buyTransactions as $transaction) {
+            $buyQueue->push([
+                'quantity' => $transaction->quantity,
+                'remaining' => $transaction->quantity,
+                'cost_per_share' => $transaction->transaction_type === 'buy' ? 
+                    $transaction->net_amount / $transaction->quantity : 0,
+                'date' => $transaction->transaction_date
+            ]);
+        }
 
-        // Calculate realized P&L
-        $soldInvestment = $avgBuyPrice * $sellTransaction->quantity;
-        $realizedPL = $sellTransaction->net_amount - $soldInvestment;
+        // Get all previous sell transactions for this stock to reduce the buy queue
+        $previousSells = StockTransaction::where('user_id', $userId)
+            ->where('stock_id', $sellTransaction->stock_id)
+            ->where('transaction_type', 'sell')
+            ->where('transaction_date', '<', $sellTransaction->transaction_date)
+            ->orWhere(function($query) use ($sellTransaction) {
+                $query->where('transaction_date', '=', $sellTransaction->transaction_date)
+                      ->where('id', '<', $sellTransaction->id);
+            })
+            ->orderBy('transaction_date', 'asc')
+            ->orderBy('id', 'asc')
+            ->get();
 
+        // Process previous sells to reduce buy queue
+        foreach ($previousSells as $prevSell) {
+            $remainingToSell = $prevSell->quantity;
+            
+            while ($remainingToSell > 0 && $buyQueue->isNotEmpty()) {
+                $buyEntry = $buyQueue->shift();
+                
+                if ($buyEntry['remaining'] <= $remainingToSell) {
+                    $remainingToSell -= $buyEntry['remaining'];
+                } else {
+                    $buyEntry['remaining'] -= $remainingToSell;
+                    $buyQueue->prepend($buyEntry);
+                    $remainingToSell = 0;
+                }
+            }
+        }
+
+        // Now calculate realized P&L for current sell transaction using FIFO
+        $sellQuantity = $sellTransaction->quantity;
+        $sellProceeds = $sellTransaction->net_amount;
+        $sellCost = 0;
+        $remainingToSell = $sellQuantity;
+
+        while ($remainingToSell > 0 && $buyQueue->isNotEmpty()) {
+            $buyEntry = $buyQueue->shift();
+            
+            if ($buyEntry['remaining'] <= $remainingToSell) {
+                // Use entire buy entry
+                $cost = $buyEntry['remaining'] * $buyEntry['cost_per_share'];
+                $sellCost += $cost;
+                $remainingToSell -= $buyEntry['remaining'];
+            } else {
+                // Partial use of buy entry
+                $cost = $remainingToSell * $buyEntry['cost_per_share'];
+                $sellCost += $cost;
+                $buyEntry['remaining'] -= $remainingToSell;
+                $buyQueue->prepend($buyEntry);
+                $remainingToSell = 0;
+            }
+        }
+
+        $realizedPL = $sellProceeds - $sellCost;
         return $realizedPL;
     }
 

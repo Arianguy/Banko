@@ -20,6 +20,20 @@ function getDaysBalance(maturity_date: string) {
     return Math.ceil(diff / (1000 * 60 * 60 * 24));
 }
 
+function renderDaysBalanceBadge(maturity_date: string) {
+    const daysBalance = getDaysBalance(maturity_date);
+    const isNegativeOrZero = daysBalance <= 0;
+    
+    return (
+        <Badge 
+            variant={isNegativeOrZero ? "destructive" : "default"}
+            className={isNegativeOrZero ? "bg-red-500 text-white" : "bg-green-500 text-white"}
+        >
+            {daysBalance}
+        </Badge>
+    );
+}
+
 const BankBalanceModal = ({ open, setOpen, banks }: { open: boolean; setOpen: (v: boolean) => void; banks: Array<{ id: number, name: string }> }) => {
     const [updateDate, setUpdateDate] = useState('');
     const [bankBalances, setBankBalances] = useState([{
@@ -726,7 +740,7 @@ const FixedDepositTable = ({ deposits, sortKey, sortDir, onSort, onEdit, onClose
                             <td className="px-2 py-2 whitespace-nowrap">{Number(fd.int_rate).toFixed(2)}</td>
                             <td className="px-2 py-2 whitespace-nowrap">{formatINR(fd.Int_amt)}</td>
                             <td className="px-2 py-2 whitespace-nowrap">{formatINR(fd.Int_year)}</td>
-                            {!showArchived && <td className="px-2 py-2 whitespace-nowrap">{getDaysBalance(fd.maturity_date)}</td>}
+                            {!showArchived && <td className="px-2 py-2 whitespace-nowrap">{renderDaysBalanceBadge(fd.maturity_date)}</td>}
                             {!showArchived && (
                                 <td className="flex gap-2 px-2 py-2 whitespace-nowrap">
                                     {isActive(fd) && (
@@ -823,7 +837,7 @@ const FixedDepositCards = ({ deposits, onEdit, onClose, onMature, showArchived }
                             </div>
                             {!showArchived && (
                                 <div className="flex-1 md:w-1/6">
-                                    <span className="font-medium">Days Balance:</span> {getDaysBalance(fd.maturity_date)}
+                                    <span className="font-medium">Days Balance:</span> {renderDaysBalanceBadge(fd.maturity_date)}
                                 </div>
                             )}
                         </div>

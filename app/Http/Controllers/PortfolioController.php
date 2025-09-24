@@ -12,7 +12,10 @@ class PortfolioController extends Controller
 {
     public function getSummaryMetrics()
     {
-        $userFds = Auth::user()->fixedDeposits()->get();
+        $userFds = Auth::user()->fixedDeposits()
+            ->where('closed', false)
+            ->where('matured', false)
+            ->get();
         // Alternative: $userFds = FixedDeposit::where('user_id', Auth::id())->get();
 
         $total_principal_invested = $userFds->sum('principal_amt');
@@ -40,7 +43,10 @@ class PortfolioController extends Controller
 
     public function getBankDistribution()
     {
-        $userFds = Auth::user()->fixedDeposits()->get();
+        $userFds = Auth::user()->fixedDeposits()
+            ->where('closed', false)
+            ->where('matured', false)
+            ->get();
 
         $distribution = $userFds->groupBy('bank')
             ->map(function ($group) {
@@ -58,7 +64,10 @@ class PortfolioController extends Controller
 
     public function getMaturityYearBreakdown()
     {
-        $userFds = Auth::user()->fixedDeposits()->get();
+        $userFds = Auth::user()->fixedDeposits()
+            ->where('closed', false)
+            ->where('matured', false)
+            ->get();
 
         $breakdown = $userFds->groupBy(function($fd) {
                 return Carbon::parse($fd->maturity_date)->year;
