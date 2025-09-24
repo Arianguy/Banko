@@ -679,6 +679,10 @@ function formatINR(amount: number) {
     return '₹ ' + Number(amount).toLocaleString('en-IN', { minimumFractionDigits: 2 });
 }
 
+function formatINRWholeNumber(amount: number) {
+    return '₹ ' + Number(amount).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+}
+
 const sortDirections = {
     asc: 'asc',
     desc: 'desc',
@@ -703,6 +707,20 @@ const isArchived = (fd: any) => !!fd?.closed || !!fd?.matured; // Use truthiness
 const isActive = (fd: any) => !isArchived(fd);
 
 const FixedDepositTable = ({ deposits, sortKey, sortDir, onSort, onEdit, onClose, onMature, showArchived }: any) => {
+    // Calculate totals for the specified columns
+    const totals = deposits.reduce((acc: any, fd: any) => {
+        acc.principal_amt += Number(fd.principal_amt) || 0;
+        acc.maturity_amt += Number(fd.maturity_amt) || 0;
+        acc.Int_amt += Number(fd.Int_amt) || 0;
+        acc.Int_year += Number(fd.Int_year) || 0;
+        return acc;
+    }, {
+        principal_amt: 0,
+        maturity_amt: 0,
+        Int_amt: 0,
+        Int_year: 0
+    });
+
     return (
         <div className="mb-6 hidden w-full overflow-x-auto md:block">
             <table className="min-w-full divide-y divide-gray-200 rounded-lg bg-white text-xs shadow md:text-sm">
@@ -781,6 +799,22 @@ const FixedDepositTable = ({ deposits, sortKey, sortDir, onSort, onEdit, onClose
                             )}
                         </tr>
                     ))}
+                    {/* Totals Row */}
+                    <tr className="bg-gray-200 border-t-2 border-gray-400">
+                        <td className="px-2 py-2 whitespace-nowrap font-bold">TOTAL</td>
+                        <td className="px-2 py-2 whitespace-nowrap"></td>
+                        <td className="px-2 py-2 whitespace-nowrap font-bold">{formatINRWholeNumber(totals.principal_amt)}</td>
+                        <td className="px-2 py-2 whitespace-nowrap font-bold">{formatINRWholeNumber(totals.maturity_amt)}</td>
+                        <td className="px-2 py-2 whitespace-nowrap"></td>
+                        <td className="px-2 py-2 whitespace-nowrap"></td>
+                        <td className="px-2 py-2 whitespace-nowrap"></td>
+                        <td className="px-2 py-2 whitespace-nowrap"></td>
+                        <td className="px-2 py-2 whitespace-nowrap font-bold">{formatINRWholeNumber(totals.Int_amt)}</td>
+                        <td className="px-2 py-2 whitespace-nowrap font-bold">{formatINRWholeNumber(totals.Int_year)}</td>
+                        {!showArchived && <td className="px-2 py-2 whitespace-nowrap"></td>}
+                        {!showArchived && <td className="px-2 py-2 whitespace-nowrap"></td>}
+                        {showArchived && <td className="px-2 py-2 whitespace-nowrap"></td>}
+                    </tr>
                 </tbody>
             </table>
         </div>
